@@ -1,125 +1,182 @@
-可以使用 QuickSight 的跨数据集过滤器（Cross-dataset filter）。不需要把两个 Dataset JOIN 到一起。
+这次下午的进度同步会议，结论比较明确：你当前在 DEV 环境的不良率开发已经基本完成，暂时不需要继续修改现有结果。接下来从明天开始，重点转为正式环境（会议转写成了「プロト／CRD」，结合上下文应当是 PROD/PRD 环境）的上线准备。
 
-## 设置步骤
+## 一、关于今天16点会议的结论
 
-假设两个 Dataset 都有字段：
+对方说明：
 
-```text
-target_month
-series_name
-gas_type
-err_code
-err_type
-```
+* 暂时采用你目前提交的数据/计算结果。
+* 已经向相关人员解释了当前结果与其他数据之间的差异。
+* 目前没有要求你修改计算逻辑。
+* 对方会另外抽取几个数据模式继续核对。
+* 如果之后发现预想之外的差异，再找你商量。
+* 即使需要修改，也会另外协商修改时间，不要求你现在立刻处理。
 
-以 `series_name` 为例：
+也就是说，这部分现在属于等待确认，不是你的当前阻塞事项。
 
-1. 打开 QuickSight Analysis。
-2. 进入对应的 Sheet。
-3. 左侧打开「Filters／フィルター」。
-4. 点击「Add filter／フィルターを追加」。
-5. 从 Dataset A 选择：
+## 二、关于历史数据
 
-```text
-series_name
-```
+历史数据如何处理，暂时还没有最终结论。对方预计明天给出答复。
 
-6. 编辑该 Filter，在「Applied to／適用先」中选择：
+目前有两个候选方案：
 
-```text
-Single sheet／このシート
-```
+1. 制作一次性程序，集中处理过去的历史数据。
+2. 将历史数据处理加入每天运行的现有程序。
 
-或者：
+在结论出来之前：
 
-```text
-All applicable visuals／適用可能なすべてのビジュアル
-```
+* 不要修改或合并应用程序代码。
+* 不要擅自启动正式环境中的应用程序。
+* 先推进数据库和QuickSight方面不依赖真实数据的准备工作。
 
-7. 勾选：
+## 三、你从明天开始要做的事情
 
-```text
-Apply cross-datasets
-データセット間に適用
-```
+顺序非常重要。
 
-8. 在 Filter 的菜单中选择：
+### 第一步：整理正式环境用的SQL/DDL
 
-```text
-Add control → Inside this sheet
-コントロールを追加 → このシート内
-```
+以DEV环境中已经完成的表和View为基础，制作正式环境使用的DDL。
 
-这样生成的一个 `series_name` 筛选控件，就可以同时控制：
+DDL中必须补充：
 
-```text
-Visual A → Dataset A
-Visual B → Dataset B
-```
-
-AWS 官方说明中，跨数据集过滤器可以将同一个 Filter 应用到不同 Dataset 的所有适用 Visual。[QuickSight 跨数据集过滤说明](https://docs.aws.amazon.com/quick/latest/userguide/cross-sheet-filters.html)
-
-## 字段必须满足的条件
-
-两个 Dataset 中的对应字段必须：
-
-* 字段名称完全一致；
-* 大小写完全一致；
-* 空格和符号完全一致；
-* QuickSight 数据类型一致。
+* 表的注释
+* 字段的注释
+* 表的逻辑名
+* 字段的逻辑名
+* 各字段、分类值的含义
 
 例如：
 
-| Dataset A            | Dataset B             | 是否可以自动映射 |
-| -------------------- | --------------------- | -------- |
-| `series_name` String | `series_name` String  | 可以       |
-| `series_name` String | `Series_Name` String  | 不可以      |
-| `target_month` Date  | `target_month` String | 不可以      |
-| `err_code` String    | `err_code` Integer    | 不可以      |
+* `alert_type`表示什么
+* 数值`1`、`2`分别表示什么
+* 新规告警和持续告警如何区分
 
-QuickSight 会根据“完全相同的字段名和数据类型”自动映射两个 Dataset 的字段。[AWS 字段映射说明](https://docs.aws.amazon.com/quick/latest/userguide/mapping-and-joining-fields.html)
+DEV环境只是试验环境，所以之前没有完整填写这些内容没关系；但正式环境使用的DDL必须整理规范。
 
-如果名称不同，可以在其中一个 Dataset 创建计算字段，例如：
+### 第二步：整理View中的字段
 
-```text
-series_name
-```
+对方认为目前View里带入了一些已经完全不使用的字段，可以考虑删除。
 
-内容为：
+会议中提到可能不需要的字段包括：
 
-```text
-{model_series}
-```
+* `register_time`或类似的登记时间字段
+* `receive_time`
+* `route2`
+* `error_detail`
+* 其他完全没有用于计算或画面展示的字段
 
-让最终字段名称和数据类型与另一个 Dataset 保持一致。
+但是会议录音中的字段名识别可能不完全准确，实际应以你当前SQL中的名称为准。
 
-## 你的 Sheet 推荐这样设置
+需要保留的内容包括：
 
-分别创建下面几个 Filter，并全部勾选 `Apply cross-datasets`：
+* 日期相关字段
+* 月、周、日等统计粒度字段
+* Error Code
+* Error Type
+* Count
+* `is_alert`
+* `alert_type`
+* `route1`等实际参与计算的字段
+* 计算使用的参数
+* 为保留计算历史而需要记录的字段
 
-```text
-target_month
-series_name
-gas_type
-err_code
-err_type
-```
+其中：
 
-最终结构为：
+* `is_alert`仍然需要。
+* `alert_type`也需要，用于区分“新规告警/持续告警”，后续可能还会影响背景颜色。
+* 当前结果表已经接近最小结构，基本不需要继续删。
+* 参数和计算条件相关的历史表建议保持原样，因为将来需要追溯“当时使用了什么参数进行计算”。
 
-```text
-target_month Filter ─┬─ Dataset A 的 Visual
-                     └─ Dataset B 的 Visual
+### 第三步：先把DDL发给负责人确认
 
-series_name Filter ──┬─ Dataset A 的 Visual
-                     └─ Dataset B 的 Visual
-```
+这是会议里最明确的要求之一。
 
-也就是说，一个筛选控件可以控制两个 Dataset，但每个筛选字段仍需分别创建一个 Filter。
+你完成DDL后：
 
-如果勾选 `Apply cross-datasets` 后，第二个 Visual 没有变化，最常见原因就是：
+1. 暂时不要直接在正式环境执行。
+2. 先将带注释和逻辑名的完整DDL共享给负责人。
+3. 等负责人确认“这样没有问题”。
+4. 得到确认后，才能在正式环境创建表和View。
 
-1. 字段名不完全相同；
-2. 字段数据类型不同；
-3. Filter 的 Applied to 只选择了第一个 Visual；
-4. 第二个 Visual 使用的是计算字段，而不是被自动映射的原始字段。
+所以不要先建表、后报告。
+
+### 第四步：确认不会影响既有表
+
+会议中检查了一个类似`Export Status`的既有表。
+
+结论是：
+
+* 这个表原本就在正式环境中。
+* 不是你这次创建的表。
+* 你的SQL清单中也没有这个表。
+* 因此不属于你的本次交付范围，不要修改它。
+
+正式执行DDL前，还需要再确认：
+
+* 只创建你清单中的表和View。
+* 不覆盖既有对象。
+* 不影响现有程序或既有表。
+* 现有表仍然可以正常运行。
+
+### 第五步：创建QuickSight数据集和基础画面
+
+DDL通过确认并创建表/View以后：
+
+* 将View导入QuickSight。
+* 创建正式环境用的数据集。
+* 在现有Analysis中创建新的Sheet/Tab。
+* 先搭建画面的基础结构。
+* 先放置必要的Visual、筛选器和画面组件。
+
+即使正式环境暂时没有数据，也可以先完成：
+
+* 数据集连接
+* 字段配置
+* Sheet结构
+* Visual框架
+* 筛选器框架
+
+因为没有实际数据，细节调整可能暂时无法完成，但要求你先做到“能够搭建的部分全部搭建起来”。
+
+## 四、现有DEV画面还需要继续美化吗？
+
+不需要。
+
+你主动问了现有QuickSight画面是否还要修正，对方回答得比较明确：
+
+* 现在的画面保持现状即可。
+* DEV画面不是最终成果物。
+* DEV环境中的画面不能直接复制为正式成果物。
+* 没必要继续花时间把DEV画面调整得非常漂亮。
+* 现在继续修改DEV环境已经没有太大意义。
+
+所以你不必因为现有DEV画面不够漂亮而担心。
+
+## 五、当前明确禁止做的事情
+
+现阶段先不要：
+
+* 合并应用程序代码。
+* 启动正式环境应用程序。
+* 决定历史数据的处理方式。
+* 未经确认就在正式环境执行DDL。
+* 修改不属于你本次创建范围的既有表。
+* 继续反复美化DEV环境的QuickSight画面。
+
+## 六、你的实际任务清单
+
+明天可以按照这个顺序执行：
+
+* [ ] 对照现有SQL清单，确认本次需要创建的表和View。
+* [ ] 删除View中完全不参与计算、展示或历史追溯的字段。
+* [ ] 保留`is_alert`、`alert_type`等后续告警显示需要的字段。
+* [ ] 为表和字段补充逻辑名、注释及分类值说明。
+* [ ] 生成正式环境用DDL。
+* [ ] 检查DDL不会覆盖或影响既有对象。
+* [ ] 将DDL先发给负责人审核。
+* [ ] 等负责人确认后再执行DDL。
+* [ ] 创建QuickSight数据集。
+* [ ] 创建新的正式环境用Sheet/Tab和基础画面。
+* [ ] 等待历史数据处理方式的最终答复。
+* [ ] 在明确答复之前，不处理应用代码合并。
+
+整体看，这次会议不是在批评你的开发成果。相反，对方认为DEV阶段已经基本完成，所以开始让你准备正式环境。这说明工作已经进入下一阶段，而且对你有明确的后续任务安排。
