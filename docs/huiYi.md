@@ -1,19 +1,156 @@
-对，你记得没错。最近会议里提到的「コントロール」，大概率是指 QuickSight 页面上的筛选控件（Filter Control）。
+看到了，报错的核心是这一句：
 
-会议要求可以理解为：
+`'cp932' codec can't encode character '\u200b' in position 9: illegal multibyte sequence`
 
-* 在正式环境的 Analysis 中先创建页面框架。
-* 配置 Dataset 和 Sheet。
-* 参考现有 QuickSight 页面，设置相同或类似的 Filter / Control。
-* Control 就是用户可以在页面上操作的下拉框、日期选择框等。
-* 暂时只做 Analysis，不需要发布成 Dashboard。
-* 页面上先放置要求的三个图表。
+这不是 QuickSight 本身的问题，而是 **Windows PowerShell / AWS CLI 输出编码问题**。`\u200b` 是 **ZERO WIDTH SPACE（零宽空格）**，而 Windows 日文环境常用的 `cp932` 无法编码这个字符。
 
-另外，Control 对数据的影响需要注意：
+你虽然执行了：
 
-* 机种、月份等 Control：会影响显示范围，部分情况下也会影响分母。
-* Error Code、Error Type：主要筛选分子，不应该导致分母随错误项目一起缩小。
-* 如果两个图表使用不同 Dataset，即使字段名称相同，一个普通 Filter Control 通常不能直接同时控制两个 Dataset；可能需要分别建立过滤器，或者通过 Parameter 实现联动。
-* 这也是会议倾向于把三张表先整合到同一个 View，再作为 QuickSight Dataset 使用的原因之一。
+```powershell
+$env:PYTHONIOENCODING="utf-8"
+```
 
-所以，你制作 QS 页面时，不能只放图表，还需要把页面顶部或合适位置的筛选下拉框等 Control 一起做出来，并尽量参考对方给你的现有 QS 页面布局。
+但从结果看，AWS CLI 仍然有一部分输出流程在尝试使用 `cp932`。
+
+最推荐你直接绕开 PowerShell 的文本重定向/输出编码，让 AWS CLI 自己把结果写到文件。
+
+试一下：
+
+```powershell
+aws quicksight describe-analysis-definition `
+  --aws-account-id 7925466187xxxx `
+  --analysis-id "你的AnalysisId" `
+  --output json | Out-File -FilePath analysis_definition.json -Encoding utf8
+```
+
+不过这里仍然可能先触发 cp932，所以更稳的方法是先把 PowerShell 控制台本身切换 UTF-8：
+
+```powershell
+chcp 65001
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+$OutputEncoding = [System.Text.Encoding]::UTF8
+$env:PYTHONIOENCODING = "utf-8"
+$env:PYTHONUTF8 = "1"
+```
+
+然后再执行：
+
+```powershell
+aws quicksight describe-analysis-definition `
+  --aws-account-id 7925466187xxxx `
+  --analysis-id "你的AnalysisId" `
+  --output json |
+Out-File -FilePath analysis_definition.json -Encoding utf8
+```
+
+### 另外，你截图里的命令有一个值得注意的地方
+
+你现在看起来写的是：
+
+```powershell
+-Out-File -FilePath analysis_definition.json -Encoding utf8
+```
+
+这里应该是 PowerShell 的：
+
+```powershell
+Out-File
+```
+
+而不是：
+
+```powershell
+-Out-File
+```
+
+也就是说完整形式应该类似：
+
+```powershell
+aws quicksight describe-analysis-definition `
+  --aws-account-id 7925466187xxxx `
+  --analysis-id xxxxx `
+  --output json |
+  Out-File -FilePath analysis_definition.json -Encoding utf8
+```
+
+或者一行写：
+
+```powershell
+aws quicksight describe-analysis-definition --aws-account-id 7925466187xxxx --analysis-id xxxxx --output json | Out-File -FilePath analysis_definition.json -Encoding utf8
+```
+
+### 如果还是报 `cp932`
+
+可以直接用 AWS CLI 的 `file` 重定向配合 PowerShell 7：
+
+```powershell
+aws quicksight describe-analysis-definition --aws-account-id 7925466187xxxx --analysis-id xxxxx --output json > analysis_definition.json
+```
+
+PowerShell 7 默认 UTF-8，这种通常可以正常工作。
+
+你也可以先确认自己的 PowerShell 版本：
+
+```powershell
+$PSVersionTable.PSVersion
+```
+
+如果是老的 **Windows PowerShell 5.1**，编码问题会比较多。
+
+### 为什么恰好 QuickSight 容易出现这个问题？
+
+`describe-analysis-definition` 会把整个 QuickSight Analysis 的定义返回出来，其中可能包含：
+
+* Sheet 名称
+* Visual title
+* Text box 内容
+* Filter 名称
+* Parameter
+* 日本语文本
+* 用户复制进去的特殊字符
+
+其中某个文本很可能包含了隐藏的：
+
+```text
+U+200B ZERO WIDTH SPACE
+```
+
+普通肉眼看不出来，例如：
+
+```text
+アラート​履歴
+```
+
+中间实际上可能藏了一个 U+200B。
+
+所以当前报错实际上表示：
+
+> AWS CLI 成功拿到了 QuickSight 的数据，但是在 Windows 上准备输出其中某个字符串时，因为存在 U+200B，而当前输出编码是 cp932，导致编码失败。
+
+我建议你先执行下面这一整组，成功率最高：
+
+```powershell
+chcp 65001
+
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+$OutputEncoding = [System.Text.Encoding]::UTF8
+
+$env:PYTHONIOENCODING = "utf-8"
+$env:PYTHONUTF8 = "1"
+
+aws quicksight describe-analysis-definition `
+  --aws-account-id 你的AWS账号ID `
+  --analysis-id 你的AnalysisID `
+  --output json |
+  Out-File -FilePath analysis_definition.json -Encoding utf8
+```
+
+然后：
+
+```powershell
+Get-Item .\analysis_definition.json
+```
+
+确认文件有没有生成。
+
+**重点：你这个错误跟 IAM 权限、QuickSight API、Analysis ID 本身关系不大，本质就是 `cp932` → UTF-8 的编码问题。**
