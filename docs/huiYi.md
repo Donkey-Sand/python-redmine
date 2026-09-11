@@ -1,156 +1,224 @@
-看到了，报错的核心是这一句：
+这次会议的核心结论是：你的“长期数据功能”整体逻辑基本获得认可，画面也被认为没有技术难点。现在最重要的不是继续做画面，而是证明画面上的数字是正确的。
 
-`'cp932' codec can't encode character '\u200b' in position 9: illegal multibyte sequence`
+## 一、上级对当前成果的评价
 
-这不是 QuickSight 本身的问题，而是 **Windows PowerShell / AWS CLI 输出编码问题**。`\u200b` 是 **ZERO WIDTH SPACE（零宽空格）**，而 Windows 日文环境常用的 `cp932` 无法编码这个字符。
+整体评价偏正面：
 
-你虽然执行了：
+* 已经确认了你提交的内容和源码。
+* 认为整体逻辑基本符合预期。
+* 短期与长期功能大量复用，所以现在做成这样是合理的。
+* 判断逻辑方面暂时没有发现明显问题。
+* 长期功能实际上已经接近完成。
 
-```powershell
-$env:PYTHONIOENCODING="utf-8"
+不过，有一个关键问题还没有通过确认：
+
+> 不能只是看到画面上出现了数字，就判断测试通过。必须确认数字的计算依据和最终结果都正确。
+
+## 二、下周最优先的任务：确认数字的妥当性
+
+上级反复强调了这一点。
+
+目前画面上有类似：
+
+* `40.83`
+* `6.28`
+
+这样的平均值。你需要确认的不只是“程序执行后显示了这些数字”，而是：
+
+1. 原始数据到底有多少件。
+2. 作为分母的天数是否正确。
+3. 计算过程是否正确。
+4. 四舍五入后的显示结果是否正确。
+5. 短期、长期两个指标都要分别确认。
+
+例如会议中提到：
+
+* 某个实际件数 ÷ 30天＝40.83
+* 某个实际件数 ÷ 180天＝6.28
+
+上级的意思是，你必须能够说明：
+
+> 数据库中的实际件数是多少，因此除以30或180之后，结果确实应该是40.83或6.28。
+
+目前DEV环境与生产环境的数据不同，所以上级只看画面无法判断这些值是否正确，需要你从后台数据、SQL查询结果或原始数据件数进行核对。
+
+建议留下如下证据：
+
+* 查询对象期间
+* 原始件数
+* 分母天数
+* 手工计算结果
+* 程序计算结果
+* QuickSight画面显示结果
+* 三者是否一致
+
+## 三、源码需要修改一处
+
+上级指出有一处源码写法“非常别扭/看着不舒服”：
+
+> あまりにも気持ち悪いソースすぎるので、直しておいてください。
+
+这不是说整个源码有问题，只是屏幕共享时指出的某一处需要整理。由于文字记录没有保留具体代码，所以需要根据你当时记下的位置修改。
+
+另外，上级也提到代码换行过多，不过态度是：
+
+* 确实有些在不必要的位置换行。
+* 看起来比较零碎。
+* 但不算错误。
+* 暂时可以不作为重点修改。
+
+因此，真正必须修改的是他在屏幕上明确指出的那一处。
+
+## 四、长期画面不需要投入太多时间
+
+关于长期的履历、检索及分析画面，上级认为：
+
+* 短期与长期的操作基本相同。
+* 区别只是使用的数据不同。
+* 画面本身已经证明能够制作。
+* 已经做出来也没问题，但继续花大量时间没有意义。
+
+所以下周的优先级是：
+
+1. 数字妥当性确认
+2. 必要的源码修正
+3. 后台程序和历史数据处理
+4. 测试书制作
+5. 画面细节完善
+
+换句话说，暂时不要把主要精力放在QuickSight画面调整上。
+
+## 五、不良率相关工作
+
+会议中你提到不良率部分还没有全部着手，上级认为剩余工作并不多：
+
+* 基本上按照短期功能的做法复制。
+* 创建必要的表或View。
+* 制作对应的QuickSight Visual。
+* 不需要重新设计不良率的计算逻辑。
+* 不应该需要两三天以上。
+
+你回答预计下周内可以完成，但上级倾向认为：
+
+> 如果只是复用短期部分，实际开发可能一天左右就能完成。
+
+这里需要注意：不要为了证明进度快而匆忙完成，数字验证仍然比画面完成时间重要。
+
+## 六、ECS测试优先级很低
+
+上级明确表示：
+
+* ECS测试不用花太多时间。
+* 短期程序已经能够运行。
+* 长期程序只是把处理期间进行了扩展。
+* 因此原则上没有理由短期能运行、长期却不能运行。
+* ECS测试一直都是低优先级。
+
+所以不要因为ECS测试拖慢数字验证和测试书制作。
+
+但这并不等于完全不测试，而是：
+
+> 做最低限度的运行确认即可，不需要在ECS测试上投入大量时间。
+
+## 七、长期历史数据需要从2021年4月开始补跑
+
+长期功能也需要像短期功能一样，执行一次过去数据的累计处理：
+
+* 对象开始时间：2021年4月
+* 需要一次性处理过去的数据
+* 需要把历史数据处理程序单独切出来
+* 做法参考短期的历史数据处理程序
+
+正确顺序是：
+
+```mermaid
+flowchart TD
+    A["确认40.83、6.28等数字"] --> B["确定当前计算程序"]
+    B --> C["切出长期历史数据处理程序"]
+    C --> D["从2021年4月开始补跑"]
+    D --> E["确认累计结果"]
 ```
 
-但从结果看，AWS CLI 仍然有一部分输出流程在尝试使用 `cp932`。
+上级特别要求：必须先确认数字正确，再把程序固定下来，最后才制作和执行历史数据处理程序。
 
-最推荐你直接绕开 PowerShell 的文本重定向/输出编码，让 AWS CLI 自己把结果写到文件。
+## 八、测试书可以继续制作
 
-试一下：
+虽然生产环境投入时间要调整，但后台实际工作可以继续：
 
-```powershell
-aws quicksight describe-analysis-definition `
-  --aws-account-id 7925466187xxxx `
-  --analysis-id "你的AnalysisId" `
-  --output json | Out-File -FilePath analysis_definition.json -Encoding utf8
-```
+* 编写长期功能的测试书。
+* 准备必要的表、View等部件。
+* 在DEV环境确认View是否可以正常使用。
+* 准备历史数据处理程序。
+* 继续完成尚未完成的内部工作。
 
-不过这里仍然可能先触发 cp932，所以更稳的方法是先把 PowerShell 控制台本身切换 UTF-8：
+会议中有一句转写成了“両立のビュー1つ”，这里很可能是语音识别错误。结合上下文，它表达的应该是：
 
-```powershell
-chcp 65001
-[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
-$OutputEncoding = [System.Text.Encoding]::UTF8
-$env:PYTHONIOENCODING = "utf-8"
-$env:PYTHONUTF8 = "1"
-```
+> 确认长期功能使用的View在DEV环境是否可以正常建立、使用或接入。
 
-然后再执行：
+## 九、生产环境投入时间由上级控制
 
-```powershell
-aws quicksight describe-analysis-definition `
-  --aws-account-id 7925466187xxxx `
-  --analysis-id "你的AnalysisId" `
-  --output json |
-Out-File -FilePath analysis_definition.json -Encoding utf8
-```
+记录中多次出现的“プロット”大概率是语音识别把 `PROD` 识别错了，实际应该是在说生产环境。
 
-### 另外，你截图里的命令有一个值得注意的地方
+上级的安排是：
 
-你现在看起来写的是：
+* 不要下周马上把长期程序全部投入生产环境。
+* 生产环境投入的时间由他来调整。
+* 表、View、测试书等准备工作可以提前完成。
+* 最后只控制“什么时候把程序放入PROD”。
 
-```powershell
--Out-File -FilePath analysis_definition.json -Encoding utf8
-```
+原因不是功能存在问题，而是当前对客户提交的计划显示：
 
-这里应该是 PowerShell 的：
+> 长期功能预计会占用整个9月。
 
-```powershell
-Out-File
-```
+但实际上你做得比计划快。如果马上告诉客户已经完成，客户可能会觉得原计划估算过长。因此，上级准备分阶段展示进度。
 
-而不是：
+会议中的“騙し騙し”“小出しにしていく”并不是让你伪造结果，而是表示：
 
-```powershell
--Out-File
-```
+* 对外不要一次性公布全部进度。
+* 由上级控制向客户展示的节奏。
+* 内部开发仍然正常提前推进。
+* 预计对客户展示的完成时间大约是9月25日前后。
 
-也就是说完整形式应该类似：
+你不需要主动向客户说明“实际上已经快做完了”，进度的对外说明交给上级处理。
 
-```powershell
-aws quicksight describe-analysis-definition `
-  --aws-account-id 7925466187xxxx `
-  --analysis-id xxxxx `
-  --output json |
-  Out-File -FilePath analysis_definition.json -Encoding utf8
-```
+## 十、剩余时间会安排下一项工作
 
-或者一行写：
+如果长期功能提前完成，空出来的时间不会闲置。上级提到了下一阶段的“保証延長”相关内容：
 
-```powershell
-aws quicksight describe-analysis-definition --aws-account-id 7925466187xxxx --analysis-id xxxxx --output json | Out-File -FilePath analysis_definition.json -Encoding utf8
-```
+* 原计划从10月开始。
+* 可以提前查看需求。
+* 提前考虑应该如何制作。
+* 先做调查、方案讨论和设计准备。
 
-### 如果还是报 `cp932`
+这说明目前不是“你的工作要结束了”，而是长期任务提前完成后，会让你提前研究下一项功能。
 
-可以直接用 AWS CLI 的 `file` 重定向配合 PowerShell 7：
+## 你下周可以这样安排
 
-```powershell
-aws quicksight describe-analysis-definition --aws-account-id 7925466187xxxx --analysis-id xxxxx --output json > analysis_definition.json
-```
+### 最高优先级
 
-PowerShell 7 默认 UTF-8，这种通常可以正常工作。
+* 核对30天平均值。
+* 核对180天平均值。
+* 从数据库确认原始件数。
+* 手工计算并与程序及画面结果比较。
+* 同时确认两个指标。
 
-你也可以先确认自己的 PowerShell 版本：
+### 第二优先级
 
-```powershell
-$PSVersionTable.PSVersion
-```
+* 修改会议中指出的那一处源码。
+* 确认长期用View在DEV环境中的结果。
+* 完善长期功能测试书。
 
-如果是老的 **Windows PowerShell 5.1**，编码问题会比较多。
+### 第三优先级
 
-### 为什么恰好 QuickSight 容易出现这个问题？
+* 切出从2021年4月开始处理的历史数据程序。
+* 在数字确认完成后固定程序。
+* 准备过去数据的一次性补跑。
 
-`describe-analysis-definition` 会把整个 QuickSight Analysis 的定义返回出来，其中可能包含：
+### 暂时不要优先处理
 
-* Sheet 名称
-* Visual title
-* Text box 内容
-* Filter 名称
-* Parameter
-* 日本语文本
-* 用户复制进去的特殊字符
+* 生产环境正式投入。
+* 大量ECS测试。
+* 继续细化与短期基本相同的QuickSight画面。
+* 自行决定向客户公开实际完成进度。
 
-其中某个文本很可能包含了隐藏的：
-
-```text
-U+200B ZERO WIDTH SPACE
-```
-
-普通肉眼看不出来，例如：
-
-```text
-アラート​履歴
-```
-
-中间实际上可能藏了一个 U+200B。
-
-所以当前报错实际上表示：
-
-> AWS CLI 成功拿到了 QuickSight 的数据，但是在 Windows 上准备输出其中某个字符串时，因为存在 U+200B，而当前输出编码是 cp932，导致编码失败。
-
-我建议你先执行下面这一整组，成功率最高：
-
-```powershell
-chcp 65001
-
-[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
-$OutputEncoding = [System.Text.Encoding]::UTF8
-
-$env:PYTHONIOENCODING = "utf-8"
-$env:PYTHONUTF8 = "1"
-
-aws quicksight describe-analysis-definition `
-  --aws-account-id 你的AWS账号ID `
-  --analysis-id 你的AnalysisID `
-  --output json |
-  Out-File -FilePath analysis_definition.json -Encoding utf8
-```
-
-然后：
-
-```powershell
-Get-Item .\analysis_definition.json
-```
-
-确认文件有没有生成。
-
-**重点：你这个错误跟 IAM 权限、QuickSight API、Analysis ID 本身关系不大，本质就是 `cp932` → UTF-8 的编码问题。**
+总体来说，这次不是对你的成果进行否定。上级已经基本认可功能和逻辑，现在只是要求把“数字正确性”证明得更扎实。最需要避免的是：只凭QuickSight显示出了数字，就认为测试完成。
