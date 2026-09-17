@@ -1,224 +1,417 @@
-这次会议的核心结论是：你的“长期数据功能”整体逻辑基本获得认可，画面也被认为没有技术难点。现在最重要的不是继续做画面，而是证明画面上的数字是正确的。
+Jo，按照你最终确认的规则，现在可以确定 SQL 的合并方式了。
 
-## 一、上级对当前成果的评价
+最终方案：保留 short_term 的全部原始明细，将 long_term 按「月份＋机种＋气体种类＋错误代码＋错误分类」汇总为警报标志，再进行 LEFT JOIN。
 
-整体评价偏正面：
+这样可以同时满足三个要求：
 
-* 已经确认了你提交的内容和源码。
-* 认为整体逻辑基本符合预期。
-* 短期与长期功能大量复用，所以现在做成这样是合理的。
-* 判断逻辑方面暂时没有发现明显问题。
-* 长期功能实际上已经接近完成。
+* `short_term.count_judgment` 的原始值不变，记录不增加、不减少。
 
-不过，有一个关键问题还没有通过确认：
+* QuickSight 继续使用 `judgment_date（月）` 和 `SUM(count_judgment)`。
 
-> 不能只是看到画面上出现了数字，就判断测试通过。必须确认数字的计算依据和最终结果都正确。
+* 同月、同机种、同气体种类、同错误代码、同错误分类下，只要短期警报大于 0，或者长期警报等于 4，对应的 Pivot 单元格就变红。
 
-## 二、下周最优先的任务：确认数字的妥当性
+不过有一点需要区分：你的 Pivot 目前只显示月份和错误代码，因此**多个机种或气体种类汇总到同一个单元格时，只要其中一个符合警报条件，该单元格就会变红。**如果用户通过筛选器选择某个机种，颜色判断则应只针对筛选后保留的数据。
 
-上级反复强调了这一点。
+# 一、最终 PostgreSQL SQL
 
-目前画面上有类似：
+下面的 SQL 使用你截图中的实际表名，可以作为 QuickSight 的 Custom SQL。
 
-* `40.83`
-* `6.28`
+SQL
 
-这样的平均值。你需要确认的不只是“程序执行后显示了这些数字”，而是：
+```
+WITH long_alert AS (
 
-1. 原始数据到底有多少件。
-2. 作为分母的天数是否正确。
-3. 计算过程是否正确。
-4. 四舍五入后的显示结果是否正确。
-5. 短期、长期两个指标都要分别确认。
+    -- 1. 按月份和五个业务维度汇总长期警报
+    SELECT
+        DATE_TRUNC('month', judgment_date)::date
+            AS alert_month,
 
-例如会议中提到：
+        series_name,
+        gas_type,
+        err_code,
+        err_type,
 
-* 某个实际件数 ÷ 30天＝40.83
-* 某个实际件数 ÷ 180天＝6.28
+        -- 只判断是否存在 alert_type = 4
+        MAX(
+            CASE
+                WHEN alert_type = 4 THEN 1
+                ELSE 0
+            END
+        ) AS long_alert_flag
 
-上级的意思是，你必须能够说明：
+    FROM
+        qdx3_fhsbu_tidydata_dev
+        .rec_fhsbu_error_threshold_alert_long_term_tidydata
 
-> 数据库中的实际件数是多少，因此除以30或180之后，结果确实应该是40.83或6.28。
+    GROUP BY
+        DATE_TRUNC('month', judgment_date)::date,
+        series_name,
+        gas_type,
+        err_code,
+        err_type
+)
 
-目前DEV环境与生产环境的数据不同，所以上级只看画面无法判断这些值是否正确，需要你从后台数据、SQL查询结果或原始数据件数进行核对。
+SELECT
 
-建议留下如下证据：
+    -- 2. 保留 short_term 全部原始字段
+    s.*,
 
-* 查询对象期间
-* 原始件数
-* 分母天数
-* 手工计算结果
-* 程序计算结果
-* QuickSight画面显示结果
-* 三者是否一致
+    -- 3. 长期警报标志
+    COALESCE(
+        l.long_alert_flag,
+        0
+    ) AS long_alert_flag,
 
-## 三、源码需要修改一处
+    -- 4. 最终背景色判断字段
+    CASE
+        WHEN s.alert_type > 0
+          OR COALESCE(l.long_alert_flag, 0) = 1
+        THEN 1
+        ELSE 0
+    END AS alert_color_flag
 
-上级指出有一处源码写法“非常别扭/看着不舒服”：
+FROM
+    qdx3_fhsbu_tidydata_dev
+    .rec_fhsbu_error_threshold_alert_short_term_tidydata AS s
 
-> あまりにも気持ち悪いソースすぎるので、直しておいてください。
+LEFT JOIN long_alert AS l
 
-这不是说整个源码有问题，只是屏幕共享时指出的某一处需要整理。由于文字记录没有保留具体代码，所以需要根据你当时记下的位置修改。
+    -- 月份一致
+    ON DATE_TRUNC('month', s.judgment_date)::date
+       = l.alert_month
 
-另外，上级也提到代码换行过多，不过态度是：
+    -- 机种一致
+    AND s.series_name = l.series_name
 
-* 确实有些在不必要的位置换行。
-* 看起来比较零碎。
-* 但不算错误。
-* 暂时可以不作为重点修改。
+    -- 气体种类一致
+    AND s.gas_type = l.gas_type
 
-因此，真正必须修改的是他在屏幕上明确指出的那一处。
+    -- 错误代码一致
+    AND s.err_code = l.err_code
 
-## 四、长期画面不需要投入太多时间
-
-关于长期的履历、检索及分析画面，上级认为：
-
-* 短期与长期的操作基本相同。
-* 区别只是使用的数据不同。
-* 画面本身已经证明能够制作。
-* 已经做出来也没问题，但继续花大量时间没有意义。
-
-所以下周的优先级是：
-
-1. 数字妥当性确认
-2. 必要的源码修正
-3. 后台程序和历史数据处理
-4. 测试书制作
-5. 画面细节完善
-
-换句话说，暂时不要把主要精力放在QuickSight画面调整上。
-
-## 五、不良率相关工作
-
-会议中你提到不良率部分还没有全部着手，上级认为剩余工作并不多：
-
-* 基本上按照短期功能的做法复制。
-* 创建必要的表或View。
-* 制作对应的QuickSight Visual。
-* 不需要重新设计不良率的计算逻辑。
-* 不应该需要两三天以上。
-
-你回答预计下周内可以完成，但上级倾向认为：
-
-> 如果只是复用短期部分，实际开发可能一天左右就能完成。
-
-这里需要注意：不要为了证明进度快而匆忙完成，数字验证仍然比画面完成时间重要。
-
-## 六、ECS测试优先级很低
-
-上级明确表示：
-
-* ECS测试不用花太多时间。
-* 短期程序已经能够运行。
-* 长期程序只是把处理期间进行了扩展。
-* 因此原则上没有理由短期能运行、长期却不能运行。
-* ECS测试一直都是低优先级。
-
-所以不要因为ECS测试拖慢数字验证和测试书制作。
-
-但这并不等于完全不测试，而是：
-
-> 做最低限度的运行确认即可，不需要在ECS测试上投入大量时间。
-
-## 七、长期历史数据需要从2021年4月开始补跑
-
-长期功能也需要像短期功能一样，执行一次过去数据的累计处理：
-
-* 对象开始时间：2021年4月
-* 需要一次性处理过去的数据
-* 需要把历史数据处理程序单独切出来
-* 做法参考短期的历史数据处理程序
-
-正确顺序是：
-
-```mermaid
-flowchart TD
-    A["确认40.83、6.28等数字"] --> B["确定当前计算程序"]
-    B --> C["切出长期历史数据处理程序"]
-    C --> D["从2021年4月开始补跑"]
-    D --> E["确认累计结果"]
+    -- 错误分类一致
+    AND s.err_type = l.err_type;
 ```
 
-上级特别要求：必须先确认数字正确，再把程序固定下来，最后才制作和执行历史数据处理程序。
+注意：这里使用的是 `LEFT JOIN`，而不是 `INNER JOIN`。即使 long_term 没有对应记录，也必须保留 short_term 的原始数据。
 
-## 八、测试书可以继续制作
+# 二、用实际数据理解 SQL 的执行结果
 
-虽然生产环境投入时间要调整，但后台实际工作可以继续：
+假设 short_term 有以下四条记录：
 
-* 编写长期功能的测试书。
-* 准备必要的表、View等部件。
-* 在DEV环境确认View是否可以正常使用。
-* 准备历史数据处理程序。
-* 继续完成尚未完成的内部工作。
+### short_term（原始明细）
 
-会议中有一句转写成了“両立のビュー1つ”，这里很可能是语音识别错误。结合上下文，它表达的应该是：
+<table class="_6IUVGW_Table" data-d-column-sizing="auto" data-d-dividers="" style="table-layout: auto;"><tbody><tr data-d-component="table-row"><td data-d-component="table-cell" data-d-valign="start">日期</td><td data-d-component="table-cell" data-d-valign="start">机种</td><td data-d-component="table-cell" data-d-valign="start">错误代码</td><td data-d-align="end" data-d-component="table-cell" data-d-valign="start">件数</td></tr><tr data-d-component="table-row"><td data-d-component="table-cell" data-d-valign="start">08-01</td><td data-d-component="table-cell" data-d-valign="start">PT7</td><td data-d-component="table-cell" data-d-valign="start">A8F0</td><td data-d-component="table-cell" data-d-valign="start">10</td></tr><tr data-d-component="table-row"><td data-d-component="table-cell" data-d-valign="start">08-02</td><td data-d-component="table-cell" data-d-valign="start">PT7</td><td data-d-component="table-cell" data-d-valign="start">A8F0</td><td data-d-component="table-cell" data-d-valign="start">20</td></tr><tr data-d-component="table-row"><td data-d-component="table-cell" data-d-valign="start">08-03</td><td data-d-component="table-cell" data-d-valign="start">PT7</td><td data-d-component="table-cell" data-d-valign="start">A8F0</td><td data-d-component="table-cell" data-d-valign="start">30</td></tr><tr data-d-component="table-row"><td data-d-component="table-cell" data-d-valign="start">08-04</td><td data-d-component="table-cell" data-d-valign="start">PT7+</td><td data-d-component="table-cell" data-d-valign="start">A8F0</td><td data-d-component="table-cell" data-d-valign="start">40</td></tr></tbody></table>
 
-> 确认长期功能使用的View在DEV环境是否可以正常建立、使用或接入。
+示例假设各行的 gas_type 和 err_type 相同，短期警报均不触发。
 
-## 九、生产环境投入时间由上级控制
+long_term 中有一条记录：
 
-记录中多次出现的“プロット”大概率是语音识别把 `PROD` 识别错了，实际应该是在说生产环境。
+### long_term（长期警报）
 
-上级的安排是：
+<table class="_6IUVGW_Table" data-d-column-sizing="auto" data-d-dividers="" style="table-layout: auto;"><tbody><tr data-d-component="table-row"><td data-d-component="table-cell" data-d-valign="start">日期</td><td data-d-component="table-cell" data-d-valign="start">机种</td><td data-d-component="table-cell" data-d-valign="start">错误代码</td><td data-d-align="end" data-d-component="table-cell" data-d-valign="start">alert_type</td></tr><tr data-d-component="table-row"><td data-d-component="table-cell" data-d-valign="start">08-05</td><td data-d-component="table-cell" data-d-valign="start">PT7</td><td data-d-component="table-cell" data-d-valign="start">A8F0</td><td data-d-align="end" data-d-component="table-cell" data-d-valign="start"><div class="ANObbW_Badge lKEGNW_Badge" data-color="danger" data-size="sm" data-pill="" data-variant="soft" data-d-component="badge" data-d-weight="medium">4</div></td></tr></tbody></table>
 
-* 不要下周马上把长期程序全部投入生产环境。
-* 生产环境投入的时间由他来调整。
-* 表、View、测试书等准备工作可以提前完成。
-* 最后只控制“什么时候把程序放入PROD”。
+执行 SQL 后：
 
-原因不是功能存在问题，而是当前对客户提交的计划显示：
+|
+日期
 
-> 长期功能预计会占用整个9月。
+|
 
-但实际上你做得比计划快。如果马上告诉客户已经完成，客户可能会觉得原计划估算过长。因此，上级准备分阶段展示进度。
+机种
 
-会议中的“騙し騙し”“小出しにしていく”并不是让你伪造结果，而是表示：
+|
 
-* 对外不要一次性公布全部进度。
-* 由上级控制向客户展示的节奏。
-* 内部开发仍然正常提前推进。
-* 预计对客户展示的完成时间大约是9月25日前后。
+count_judgment
 
-你不需要主动向客户说明“实际上已经快做完了”，进度的对外说明交给上级处理。
+|
 
-## 十、剩余时间会安排下一项工作
+alert_color_flag
 
-如果长期功能提前完成，空出来的时间不会闲置。上级提到了下一阶段的“保証延長”相关内容：
+|
+| --- | --- | --- | --- |
+|
 
-* 原计划从10月开始。
-* 可以提前查看需求。
-* 提前考虑应该如何制作。
-* 先做调查、方案讨论和设计准备。
+08-01
 
-这说明目前不是“你的工作要结束了”，而是长期任务提前完成后，会让你提前研究下一项功能。
+|
 
-## 你下周可以这样安排
+PT7
 
-### 最高优先级
+|
 
-* 核对30天平均值。
-* 核对180天平均值。
-* 从数据库确认原始件数。
-* 手工计算并与程序及画面结果比较。
-* 同时确认两个指标。
+10
 
-### 第二优先级
+|
 
-* 修改会议中指出的那一处源码。
-* 确认长期用View在DEV环境中的结果。
-* 完善长期功能测试书。
+1
 
-### 第三优先级
+|
+|
 
-* 切出从2021年4月开始处理的历史数据程序。
-* 在数字确认完成后固定程序。
-* 准备过去数据的一次性补跑。
+08-02
 
-### 暂时不要优先处理
+|
 
-* 生产环境正式投入。
-* 大量ECS测试。
-* 继续细化与短期基本相同的QuickSight画面。
-* 自行决定向客户公开实际完成进度。
+PT7
 
-总体来说，这次不是对你的成果进行否定。上级已经基本认可功能和逻辑，现在只是要求把“数字正确性”证明得更扎实。最需要避免的是：只凭QuickSight显示出了数字，就认为测试完成。
+|
+
+20
+
+|
+
+1
+
+|
+|
+
+08-03
+
+|
+
+PT7
+
+|
+
+30
+
+|
+
+1
+
+|
+|
+
+08-04
+
+|
+
+PT7+
+
+|
+
+40
+
+|
+
+0
+
+|
+
+可以发现：
+
+* PT7 的三条数据都匹配到了同月的长期警报。
+
+* PT7+ 因为机种不同，不会匹配 PT7 的长期警报。
+
+* 四条 short_term 记录全部保留。
+
+* `count_judgment` 的数值完全不变。
+
+当 QuickSight 不筛选机种时，这四条记录将汇总到同一个月份、同一个错误代码的单元格。
+
+### QuickSight 最终显示效果
+
+<table class="_6IUVGW_Table" data-d-column-sizing="auto" data-d-dividers="" style="table-layout: auto;"><tbody><tr data-d-component="table-row"><td data-d-component="table-cell" data-d-valign="start">単月件数</td><td data-d-align="end" data-d-component="table-cell" data-d-valign="start">A8F0</td></tr><tr data-d-component="table-row"><td data-d-component="table-cell" data-d-valign="start">2026年08月</td><td data-d-align="end" data-d-component="table-cell" data-d-valign="start"><div class="oIb9lq_Box" data-d-auto-spacing="" data-d-component="box" data-d-direction="col" style="--smoothing-background-color: #c62828; border-radius: var(--radius-xs); --w-box-gutter-block-end: calc(var(--spacing, 0.25rem) * 2); --w-box-gutter-block-start: calc(var(--spacing, 0.25rem) * 2); --w-box-gutter-inline-end: calc(var(--spacing, 0.25rem) * 2); --w-box-gutter-inline-start: calc(var(--spacing, 0.25rem) * 2); padding-block: calc(var(--spacing, 0.25rem) * 2); padding-inline: calc(var(--spacing, 0.25rem) * 2); background-color: rgb(198, 40, 40);"><h2 class="w6asjq_TextBase GgxHUa_Title" data-d-component="title" data-d-size="lg" data-d-weight="semibold" data-d-text-align="end" style="color: rgb(255, 255, 255);">100</h2></div></td></tr></tbody></table>
+
+SUM(count_judgment) = 100；MAX(alert_color_flag) = 1，因此显示红色。
+
+如果在 Dashboard 中筛选 `series_name = PT7+`，那么只剩下 40 这一条数据，颜色也会恢复正常。
+
+这正是我们在 JOIN 中加入机种、气体种类和错误分类的意义。
+
+# 三、QuickSight 的具体修改方法
+
+你当前的 Pivot 配置无需重新制作。
+
+## 保留现有 Pivot 配置
+
+行（Rows）
+
+judgment_date
+
+集計：月
+
+不修改
+
+列（Columns）
+
+err_code
+
+不修改
+
+值（Values）
+
+count_judgment
+
+合計（SUM）
+
+不修改
+
+只需要更新数据集，并调整背景色条件。
+
+## 背景色条件设置
+
+将原先基于 `alert_type` 的判断替换为以下配置：
+
+|
+设置项目
+
+|
+
+设置值
+
+|
+| --- | --- |
+|
+
+格式化目标
+
+|
+
+count_judgment
+
+|
+|
+
+判断依据
+
+|
+
+alert_color_flag
+
+|
+|
+
+聚合方式
+
+|
+
+MAX
+
+|
+|
+
+条件
+
+|
+
+大于 0
+
+|
+|
+
+背景色
+
+|
+
+红色
+
+|
+
+这样，QuickSight 在计算月份件数时仍然使用 SUM，而在判断背景颜色时使用 MAX。
+
+如果当前条件格式已经存在，建议直接修改原来的规则，避免新旧两条规则同时生效，造成颜色冲突。
+
+# 四、验证 SQL 是否真的没有影响件数
+
+这是正式替换 QuickSight 数据集前必须检查的一步。
+
+下面提供一条可以直接运行的验证 SQL。
+
+将第一部分的完整 SQL 放进 `merged_data` 中：
+
+SQL
+
+```
+WITH long_alert AS (
+    -- 第一部分的 long_alert 查询
+),
+merged_data AS (
+    -- 第一部分的最终 SELECT 查询
+)
+SELECT
+    (SELECT COUNT(*)
+     FROM qdx3_fhsbu_tidydata_dev
+         .rec_fhsbu_error_threshold_alert_short_term_tidydata)
+         AS original_rows,
+
+    (SELECT COUNT(*)
+     FROM merged_data)
+         AS merged_rows,
+
+    (SELECT SUM(count_judgment)
+     FROM qdx3_fhsbu_tidydata_dev
+         .rec_fhsbu_error_threshold_alert_short_term_tidydata)
+         AS original_count,
+
+    (SELECT SUM(count_judgment)
+     FROM merged_data)
+         AS merged_count;
+```
+
+这里是验证 SQL 的结构示例，两个注释位置需要替换为第一部分对应的实际查询，不能直接将注释当作完整 SQL 执行。
+
+预期结果：
+
+|
+original_rows
+
+|
+
+merged_rows
+
+|
+
+original_count
+
+|
+
+merged_count
+
+|
+| --- | --- | --- | --- |
+|
+
+1000
+
+|
+
+1000
+
+|
+
+5000
+
+|
+
+5000
+
+|
+
+以上数字仅为示例。实际执行时，两组结果必须分别相等。
+
+更严格的验证是比较每个「月份＋错误代码」的 SUM，确保 Pivot 每个单元格的件数也一致。
+
+# 五、一个容易忽略的情况：长期警报只有 long_term 有记录
+
+假设：
+
+```
+short_term：
+2026-08 | A8F0 | 存在数据
+
+long_term：
+2026-08 | A9F0 | alert_type = 4
+```
+
+如果 short_term 中完全没有 A9F0 的数据，那么采用上述 LEFT JOIN 后，Pivot 不会自动生成一个新的 A9F0 单元格。
+
+因为我们是以 short_term 为主表。
+
+这符合「不改变原来的统计件数」的设计，但如果客户还要求显示仅存在于 long_term 的错误代码，就需要另外设计数据集，不能简单地把 long_term 的记录直接追加进去。
+
+最终结论：使用第一部分的 SQL，保留 short_term 原始明细，对 long_term 按月份和全部业务维度进行警报汇总，再 LEFT JOIN。
+
+这是在你已确认的匹配规则下，既能保持 `SUM(count_judgment)` 不变，又能让长期警报参与 QuickSight 背景色判断的实现方式。
