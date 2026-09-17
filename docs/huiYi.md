@@ -415,3 +415,75 @@ long_term：
 最终结论：使用第一部分的 SQL，保留 short_term 原始明细，对 long_term 按月份和全部业务维度进行警报汇总，再 LEFT JOIN。
 
 这是在你已确认的匹配规则下，既能保持 `SUM(count_judgment)` 不变，又能让长期警报参与 QuickSight 背景色判断的实现方式。
+
+
+
+----修改sql
+
+
+WITH long_alert AS (
+
+    SELECT
+        DATE_TRUNC('month', judgment_date)::date
+            AS alert_month,
+
+        series_name,
+        gas_type,
+        err_code,
+        err_type,
+
+        -- 长期警报：存在 alert_type = 4 时返回 4
+        MAX(
+            CASE
+                WHEN alert_type = 4 THEN 4
+                ELSE 0
+            END
+        ) AS is_alert_long
+
+    FROM
+        qdx3_fhsbu_tidydata_dev
+        .rec_fhsbu_error_threshold_alert_long_term_tidydata
+
+    GROUP BY
+        DATE_TRUNC('month', judgment_date)::date,
+        series_name,
+        gas_type,
+        err_code,
+        err_type
+)
+
+SELECT
+
+    -- 保留 short_term 的全部原始字段
+    s.*,
+
+    -- 长期警报标志：4 或 0
+    COALESCE(
+        l.is_alert_long,
+        0
+    ) AS is_alert_long,
+
+    -- 综合背景色判断
+    CASE
+        WHEN s.alert_type > 0
+          OR COALESCE(l.is_alert_long, 0) = 4
+        THEN 1
+        ELSE 0
+    END AS alert_color_flag
+
+FROM
+    qdx3_fhsbu_tidydata_dev
+    .rec_fhsbu_error_threshold_alert_short_term_tidydata AS s
+
+LEFT JOIN long_alert AS l
+
+    ON DATE_TRUNC('month', s.judgment_date)::date
+       = l.alert_month
+
+    AND s.series_name = l.series_name
+
+    AND s.gas_type = l.gas_type
+
+    AND s.err_code = l.err_code
+
+    AND s.err_type = l.err_type;
