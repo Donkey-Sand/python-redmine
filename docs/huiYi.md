@@ -1,303 +1,481 @@
-Jo，按照你最终确认的规则，现在可以确定 SQL 的合并方式了。
+Jo，你提出的这两个问题都很有道理。尤其是 `DATE_TRUNC()`，理解它为什么出现在 JOIN 条件中，就能理解整个数据合并的设计。
 
-最终方案：保留 short_term 的全部原始明细，将 long_term 按「月份＋机种＋气体种类＋错误代码＋错误分类」汇总为警报标志，再进行 LEFT JOIN。
+另外，`record_source` 可以删除。 如果你希望通过 `alert_type = 4` 识别长期告警，那么我们可以让 long_term 独有记录的 `alert_type` 直接等于 4。
 
-这样可以同时满足三个要求：
+不过这里有一个小前提：short_term 原本的 `alert_type` 不能也取值为 4，否则仅凭这个字段无法区分记录来源。
 
-* `short_term.count_judgment` 的原始值不变，记录不增加、不减少。
+# 一、为什么要使用 DATE_TRUNC('month', judgment_date)？
 
-* QuickSight 继续使用 `judgment_date（月）` 和 `SUM(count_judgment)`。
+先看一个具体例子。
 
-* 同月、同机种、同气体种类、同错误代码、同错误分类下，只要短期警报大于 0，或者长期警报等于 4，对应的 Pivot 单元格就变红。
+假设两张表中分别存在以下记录：
 
-不过有一点需要区分：你的 Pivot 目前只显示月份和错误代码，因此**多个机种或气体种类汇总到同一个单元格时，只要其中一个符合警报条件，该单元格就会变红。**如果用户通过筛选器选择某个机种，颜色判断则应只针对筛选后保留的数据。
+short_term
 
-# 一、最终 PostgreSQL SQL
+<table class="_6IUVGW_Table" data-d-column-sizing="auto" data-d-dividers="" style="table-layout: auto;"><tbody><tr data-d-component="table-row"><td data-d-component="table-cell" data-d-valign="start">judgment_date</td><td data-d-component="table-cell" data-d-valign="start">err_code</td><td data-d-align="end" data-d-component="table-cell" data-d-valign="start">count_judgment</td></tr><tr data-d-component="table-row"><td data-d-component="table-cell" data-d-valign="start">2025-05-01</td><td data-d-component="table-cell" data-d-valign="start">78F2</td><td data-d-align="end" data-d-component="table-cell" data-d-valign="start">10</td></tr></tbody></table>
 
-下面的 SQL 使用你截图中的实际表名，可以作为 QuickSight 的 Custom SQL。
+long_term
+
+<table class="_6IUVGW_Table" data-d-column-sizing="auto" data-d-dividers="" style="table-layout: auto;"><tbody><tr data-d-component="table-row"><td data-d-component="table-cell" data-d-valign="start">judgment_date</td><td data-d-component="table-cell" data-d-valign="start">err_code</td><td data-d-align="end" data-d-component="table-cell" data-d-valign="start">alert_type</td></tr><tr data-d-component="table-row"><td data-d-component="table-cell" data-d-valign="start">2025-05-05</td><td data-d-component="table-cell" data-d-valign="start">78F2</td><td data-d-align="end" data-d-component="table-cell" data-d-valign="start">4</td></tr></tbody></table>
+
+如果直接按照日期进行关联：
+
+SQL
+
+```
+ON s.judgment_date = l.judgment_date
+```
+
+那么：
+
+```
+2025-05-01 = 2025-05-05
+
+结果：FALSE
+```
+
+两条记录无法匹配。
+
+但是，你的 QuickSight Pivot Table 是按照月份聚合的。
+
+也就是说，在业务上，这两条记录都属于：
+
+2025 年 5 月的 78F2。
+
+因此，我们需要在关联时忽略日期中的具体日，只比较年月。
+
+## 1. DATE_TRUNC 的具体作用
+
+PostgreSQL 的 `DATE_TRUNC()` 用于将日期或时间截断到指定的时间单位。
+
+例如：
+
+SQL
+
+```
+SELECT
+    DATE_TRUNC('month', DATE '2025-05-05');
+```
+
+结果是：
+
+```
+2025-05-01 00:00:00
+```
+
+它不是把日期转换为字符串 `2025-05`，而是将时间截断到该月的第一天。
+
+下面可以看到不同日期经过处理后的结果：
+
+|
+原始日期
+
+|
+
+DATE_TRUNC('month', ...)
+
+|
+| --- | --- |
+|
+
+2025-05-01
+
+|
+
+2025-05-01
+
+|
+|
+
+2025-05-05
+
+|
+
+2025-05-01
+
+|
+|
+
+2025-05-28
+
+|
+
+2025-05-01
+
+|
+|
+
+2025-06-01
+
+|
+
+2025-06-01
+
+|
+
+这里省略了结果中的时间部分。
+
+因此：
+
+SQL
+
+```
+DATE_TRUNC('month', s.judgment_date)
+=
+DATE_TRUNC('month', l.judgment_date)
+```
+
+实际上是在判断：
+
+两条记录是不是属于同一个月份？
+
+## 2. 为什么后面还要加 ::date？
+
+你之前看到的是：
+
+SQL
+
+```
+DATE_TRUNC('month', s.judgment_date)::date
+```
+
+其中的 `::date` 是 PostgreSQL 的类型转换语法。
+
+它将截断后的时间值转换成 DATE 类型。
+
+例如：
+
+```
+DATE_TRUNC 的结果：
+2025-05-01 00:00:00
+
+转换为 date 后：
+2025-05-01
+```
+
+对于你当前按月关联的需求，这种写法比较直观。
+
+不过，`::date` 并不是实现月份匹配的必要条件。如果两侧使用兼容的时间类型，直接比较 `DATE_TRUNC()` 的结果也可以。
+
+# 二、为什么 SQL 要按月份关联，而不是由 QuickSight 处理？
+
+这两个操作虽然都涉及月份，但作用完全不同。
+
+PostgreSQL
+
+DATE_TRUNC('month', judgment_date)
+
+用于判断两张表中的记录是否属于同一个月份，从而确定应该把哪个长期告警关联到哪个短期数据。
+
+QuickSight
+
+judgment_date → 月
+
+用于将关联后的每日明细按月份分组，再计算 SUM(count_judgment)。
+
+因此，虽然我们在 SQL 中使用了 `DATE_TRUNC()`，但是：
+
+* short_term 原始的 `judgment_date` 不会被修改。
+
+* short_term 原始的 `count_judgment` 不会被修改。
+
+* QuickSight 依然按照原来的方式按月聚合。
+
+这里的 `DATE_TRUNC()` 只是用于匹配长期告警，不是为了提前计算 Pivot 的月度件数。
+
+# 三、删除 record_source 后的最终 SQL
+
+按照你的要求，这次进行以下修改：
+
+* 删除 `record_source`。
+
+* 保留 `is_alert_long`，长期告警时值为 4。
+
+* long_term 独有记录的 `alert_type` 也设置为 4。
+
+* long_term 独有记录的 `count_judgment` 设置为 0。
+
+* short_term 的原始明细和件数保持不变。
 
 SQL
 
 ```
 WITH long_alert AS (
 
-    -- 1. 按月份和五个业务维度汇总长期警报
-    SELECT
-        DATE_TRUNC('month', judgment_date)::date
-            AS alert_month,
+    -- 1. 每个月、每个业务组合保留一条长期告警
 
-        series_name,
-        gas_type,
-        err_code,
-        err_type,
-
-        -- 只判断是否存在 alert_type = 4
-        MAX(
-            CASE
-                WHEN alert_type = 4 THEN 1
-                ELSE 0
-            END
-        ) AS long_alert_flag
-
-    FROM
-        qdx3_fhsbu_tidydata_dev
-        .rec_fhsbu_error_threshold_alert_long_term_tidydata
-
-    GROUP BY
+    SELECT DISTINCT ON (
         DATE_TRUNC('month', judgment_date)::date,
         series_name,
         gas_type,
         err_code,
         err_type
+    )
+
+        judgment_date,
+        series_name,
+        gas_type,
+        err_code,
+        err_type,
+
+        threshold_group_id,
+        threshold_group_name,
+
+        4 AS is_alert_long
+
+    FROM
+        qdx3_fhsbu_tidydata_dev
+        .rec_fhsbu_error_threshold_alert_long_term_tidydata
+
+    WHERE alert_type = 4
+
+    ORDER BY
+        DATE_TRUNC('month', judgment_date)::date,
+        series_name,
+        gas_type,
+        err_code,
+        err_type,
+        judgment_date
+),
+
+short_data AS (
+
+    -- 2. 保留 short_term 的所有原始记录
+
+    SELECT
+        s.judgment_date,
+        s.series_name,
+        s.gas_type,
+        s.err_code,
+        s.err_type,
+
+        s.threshold_group_id,
+        s.threshold_group_name,
+
+        s.threshold_a,
+        s.threshold_b,
+        s.threshold_c,
+        s.threshold_d,
+
+        s.alert_type,
+        s.count_judgment,
+        s.count_comparison_avg,
+        s.is_alert,
+
+        COALESCE(
+            l.is_alert_long,
+            0
+        ) AS is_alert_long,
+
+        CASE
+            WHEN s.alert_type > 0
+              OR COALESCE(l.is_alert_long, 0) = 4
+            THEN 1
+            ELSE 0
+        END AS alert_color_flag
+
+    FROM
+        qdx3_fhsbu_tidydata_dev
+        .rec_fhsbu_error_threshold_alert_short_term_tidydata s
+
+    LEFT JOIN long_alert l
+
+        ON DATE_TRUNC('month', s.judgment_date)::date
+           = DATE_TRUNC('month', l.judgment_date)::date
+
+        AND s.series_name = l.series_name
+        AND s.gas_type = l.gas_type
+        AND s.err_code = l.err_code
+        AND s.err_type = l.err_type
+),
+
+long_only_data AS (
+
+    -- 3. 补充 short_term 中不存在的月度长期告警
+
+    SELECT
+        l.judgment_date,
+        l.series_name,
+        l.gas_type,
+        l.err_code,
+        l.err_type,
+
+        l.threshold_group_id,
+        l.threshold_group_name,
+
+        NULL AS threshold_a,
+        NULL AS threshold_b,
+        NULL AS threshold_c,
+        NULL AS threshold_d,
+
+        -- 按你的要求，长期独有记录的 alert_type = 4
+        4 AS alert_type,
+
+        -- 不影响短期件数统计
+        0 AS count_judgment,
+
+        NULL AS count_comparison_avg,
+        NULL AS is_alert,
+
+        -- 长期告警标志
+        4 AS is_alert_long,
+
+        -- 红色背景
+        1 AS alert_color_flag
+
+    FROM long_alert l
+
+    WHERE NOT EXISTS (
+
+        SELECT 1
+
+        FROM
+            qdx3_fhsbu_tidydata_dev
+            .rec_fhsbu_error_threshold_alert_short_term_tidydata s
+
+        WHERE
+            DATE_TRUNC('month', s.judgment_date)::date
+            = DATE_TRUNC('month', l.judgment_date)::date
+
+            AND s.series_name = l.series_name
+            AND s.gas_type = l.gas_type
+            AND s.err_code = l.err_code
+            AND s.err_type = l.err_type
+    )
 )
 
-SELECT
+-- 4. 合并最终数据
 
-    -- 2. 保留 short_term 全部原始字段
-    s.*,
+SELECT *
+FROM short_data
 
-    -- 3. 长期警报标志
-    COALESCE(
-        l.long_alert_flag,
-        0
-    ) AS long_alert_flag,
+UNION ALL
 
-    -- 4. 最终背景色判断字段
-    CASE
-        WHEN s.alert_type > 0
-          OR COALESCE(l.long_alert_flag, 0) = 1
-        THEN 1
-        ELSE 0
-    END AS alert_color_flag
-
-FROM
-    qdx3_fhsbu_tidydata_dev
-    .rec_fhsbu_error_threshold_alert_short_term_tidydata AS s
-
-LEFT JOIN long_alert AS l
-
-    -- 月份一致
-    ON DATE_TRUNC('month', s.judgment_date)::date
-       = l.alert_month
-
-    -- 机种一致
-    AND s.series_name = l.series_name
-
-    -- 气体种类一致
-    AND s.gas_type = l.gas_type
-
-    -- 错误代码一致
-    AND s.err_code = l.err_code
-
-    -- 错误分类一致
-    AND s.err_type = l.err_type;
+SELECT *
+FROM long_only_data;
 ```
 
-注意：这里使用的是 `LEFT JOIN`，而不是 `INNER JOIN`。即使 long_term 没有对应记录，也必须保留 short_term 的原始数据。
+这份 SQL 沿用上一版的字段清单；如果实际表字段的数据类型或名称与之前的截图不一致，需要以数据库实际定义为准。另外，以上关联假定五个业务维度的字段不为 NULL；如果允许 NULL 且需要将两侧 NULL 视为相同，应将对应的 `=` 改为 `IS NOT DISTINCT FROM`。
 
-# 二、用实际数据理解 SQL 的执行结果
+# 四、修改后，78F2 的数据会是什么样？
 
-假设 short_term 有以下四条记录：
-
-### short_term（原始明细）
-
-<table class="_6IUVGW_Table" data-d-column-sizing="auto" data-d-dividers="" style="table-layout: auto;"><tbody><tr data-d-component="table-row"><td data-d-component="table-cell" data-d-valign="start">日期</td><td data-d-component="table-cell" data-d-valign="start">机种</td><td data-d-component="table-cell" data-d-valign="start">错误代码</td><td data-d-align="end" data-d-component="table-cell" data-d-valign="start">件数</td></tr><tr data-d-component="table-row"><td data-d-component="table-cell" data-d-valign="start">08-01</td><td data-d-component="table-cell" data-d-valign="start">PT7</td><td data-d-component="table-cell" data-d-valign="start">A8F0</td><td data-d-component="table-cell" data-d-valign="start">10</td></tr><tr data-d-component="table-row"><td data-d-component="table-cell" data-d-valign="start">08-02</td><td data-d-component="table-cell" data-d-valign="start">PT7</td><td data-d-component="table-cell" data-d-valign="start">A8F0</td><td data-d-component="table-cell" data-d-valign="start">20</td></tr><tr data-d-component="table-row"><td data-d-component="table-cell" data-d-valign="start">08-03</td><td data-d-component="table-cell" data-d-valign="start">PT7</td><td data-d-component="table-cell" data-d-valign="start">A8F0</td><td data-d-component="table-cell" data-d-valign="start">30</td></tr><tr data-d-component="table-row"><td data-d-component="table-cell" data-d-valign="start">08-04</td><td data-d-component="table-cell" data-d-valign="start">PT7+</td><td data-d-component="table-cell" data-d-valign="start">A8F0</td><td data-d-component="table-cell" data-d-valign="start">40</td></tr></tbody></table>
-
-示例假设各行的 gas_type 和 err_type 相同，短期警报均不触发。
-
-long_term 中有一条记录：
-
-### long_term（长期警报）
-
-<table class="_6IUVGW_Table" data-d-column-sizing="auto" data-d-dividers="" style="table-layout: auto;"><tbody><tr data-d-component="table-row"><td data-d-component="table-cell" data-d-valign="start">日期</td><td data-d-component="table-cell" data-d-valign="start">机种</td><td data-d-component="table-cell" data-d-valign="start">错误代码</td><td data-d-align="end" data-d-component="table-cell" data-d-valign="start">alert_type</td></tr><tr data-d-component="table-row"><td data-d-component="table-cell" data-d-valign="start">08-05</td><td data-d-component="table-cell" data-d-valign="start">PT7</td><td data-d-component="table-cell" data-d-valign="start">A8F0</td><td data-d-align="end" data-d-component="table-cell" data-d-valign="start"><div class="ANObbW_Badge lKEGNW_Badge" data-color="danger" data-size="sm" data-pill="" data-variant="soft" data-d-component="badge" data-d-weight="medium">4</div></td></tr></tbody></table>
-
-执行 SQL 后：
+对于你发现的 2025 年 5 月 5 日的长期告警，如果 short_term 在同月、同业务组合下完全没有记录，那么 SQL 将生成：
 
 |
-日期
+字段
 
 |
 
-机种
+值
 
+|
+| --- | --- |
+|
+
+judgment_date
+
+|
+
+2025-05-05
+
+|
+|
+
+err_code
+
+|
+
+78F2
+
+|
+|
+
+alert_type
+
+|
+
+4
+
+|
 |
 
 count_judgment
-
-|
-
-alert_color_flag
-
-|
-| --- | --- | --- | --- |
-|
-
-08-01
-
-|
-
-PT7
-
-|
-
-10
-
-|
-
-1
-
-|
-|
-
-08-02
-
-|
-
-PT7
-
-|
-
-20
-
-|
-
-1
-
-|
-|
-
-08-03
-
-|
-
-PT7
-
-|
-
-30
-
-|
-
-1
-
-|
-|
-
-08-04
-
-|
-
-PT7+
-
-|
-
-40
 
 |
 
 0
 
 |
-
-可以发现：
-
-* PT7 的三条数据都匹配到了同月的长期警报。
-
-* PT7+ 因为机种不同，不会匹配 PT7 的长期警报。
-
-* 四条 short_term 记录全部保留。
-
-* `count_judgment` 的数值完全不变。
-
-当 QuickSight 不筛选机种时，这四条记录将汇总到同一个月份、同一个错误代码的单元格。
-
-### QuickSight 最终显示效果
-
-<table class="_6IUVGW_Table" data-d-column-sizing="auto" data-d-dividers="" style="table-layout: auto;"><tbody><tr data-d-component="table-row"><td data-d-component="table-cell" data-d-valign="start">単月件数</td><td data-d-align="end" data-d-component="table-cell" data-d-valign="start">A8F0</td></tr><tr data-d-component="table-row"><td data-d-component="table-cell" data-d-valign="start">2026年08月</td><td data-d-align="end" data-d-component="table-cell" data-d-valign="start"><div class="oIb9lq_Box" data-d-auto-spacing="" data-d-component="box" data-d-direction="col" style="--smoothing-background-color: #c62828; border-radius: var(--radius-xs); --w-box-gutter-block-end: calc(var(--spacing, 0.25rem) * 2); --w-box-gutter-block-start: calc(var(--spacing, 0.25rem) * 2); --w-box-gutter-inline-end: calc(var(--spacing, 0.25rem) * 2); --w-box-gutter-inline-start: calc(var(--spacing, 0.25rem) * 2); padding-block: calc(var(--spacing, 0.25rem) * 2); padding-inline: calc(var(--spacing, 0.25rem) * 2); background-color: rgb(198, 40, 40);"><h2 class="w6asjq_TextBase GgxHUa_Title" data-d-component="title" data-d-size="lg" data-d-weight="semibold" data-d-text-align="end" style="color: rgb(255, 255, 255);">100</h2></div></td></tr></tbody></table>
-
-SUM(count_judgment) = 100；MAX(alert_color_flag) = 1，因此显示红色。
-
-如果在 Dashboard 中筛选 `series_name = PT7+`，那么只剩下 40 这一条数据，颜色也会恢复正常。
-
-这正是我们在 JOIN 中加入机种、气体种类和错误分类的意义。
-
-# 三、QuickSight 的具体修改方法
-
-你当前的 Pivot 配置无需重新制作。
-
-## 保留现有 Pivot 配置
-
-行（Rows）
-
-judgment_date
-
-集計：月
-
-不修改
-
-列（Columns）
-
-err_code
-
-不修改
-
-值（Values）
-
-count_judgment
-
-合計（SUM）
-
-不修改
-
-只需要更新数据集，并调整背景色条件。
-
-## 背景色条件设置
-
-将原先基于 `alert_type` 的判断替换为以下配置：
-
 |
-设置项目
+
+is_alert_long
 
 |
 
-设置值
+4
 
 |
-| --- | --- |
-|
-
-格式化目标
-
-|
-
-count_judgment
-
-|
-|
-
-判断依据
-
 |
 
 alert_color_flag
 
 |
-|
 
-聚合方式
-
-|
-
-MAX
-
-|
-|
-
-条件
+1
 
 |
 
-大于 0
+QuickSight 最终可以显示：
+
+## 発生件数
+
+<table class="_6IUVGW_Table" data-d-column-sizing="auto" data-d-dividers="" style="table-layout: auto;"><tbody><tr data-d-component="table-row"><td data-d-component="table-cell" data-d-has-width="" data-d-valign="start" style="width: 50%;">単月件数</td><td data-d-align="end" data-d-component="table-cell" data-d-valign="start">78F2</td></tr><tr data-d-component="table-row"><td data-d-component="table-cell" data-d-valign="start">2025年05月</td><td data-d-align="end" data-d-component="table-cell" data-d-valign="start"><div class="oIb9lq_Box" data-d-auto-spacing="" data-d-component="box" data-d-direction="col" style="--smoothing-background-color: #c62828; border-radius: var(--radius-xs); --w-box-gutter-block-end: calc(var(--spacing, 0.25rem) * 2); --w-box-gutter-block-start: calc(var(--spacing, 0.25rem) * 2); --w-box-gutter-inline-end: calc(var(--spacing, 0.25rem) * 2); --w-box-gutter-inline-start: calc(var(--spacing, 0.25rem) * 2); padding-block: calc(var(--spacing, 0.25rem) * 2); padding-inline: calc(var(--spacing, 0.25rem) * 2); background-color: rgb(198, 40, 40);"><h2 class="w6asjq_TextBase GgxHUa_Title" data-d-component="title" data-d-size="lg" data-d-weight="semibold" data-d-text-align="end" style="color: rgb(255, 255, 255);">0</h2></div></td></tr></tbody></table>
+
+QuickSight 的配置仍然保持：
+
+|
+项目
+
+|
+
+设置
+
+|
+| --- | --- |
+|
+
+Rows
+
+|
+
+judgment_date（月）
+
+|
+|
+
+Columns
+
+|
+
+err_code
+
+|
+|
+
+Values
+
+|
+
+SUM(count_judgment)
+
+|
+|
+
+条件格式
+
+|
+
+MAX(alert_color_flag) > 0
 
 |
 |
@@ -310,180 +488,4 @@ MAX
 
 |
 
-这样，QuickSight 在计算月份件数时仍然使用 SUM，而在判断背景颜色时使用 MAX。
-
-如果当前条件格式已经存在，建议直接修改原来的规则，避免新旧两条规则同时生效，造成颜色冲突。
-
-# 四、验证 SQL 是否真的没有影响件数
-
-这是正式替换 QuickSight 数据集前必须检查的一步。
-
-下面提供一条可以直接运行的验证 SQL。
-
-将第一部分的完整 SQL 放进 `merged_data` 中：
-
-SQL
-
-```
-WITH long_alert AS (
-    -- 第一部分的 long_alert 查询
-),
-merged_data AS (
-    -- 第一部分的最终 SELECT 查询
-)
-SELECT
-    (SELECT COUNT(*)
-     FROM qdx3_fhsbu_tidydata_dev
-         .rec_fhsbu_error_threshold_alert_short_term_tidydata)
-         AS original_rows,
-
-    (SELECT COUNT(*)
-     FROM merged_data)
-         AS merged_rows,
-
-    (SELECT SUM(count_judgment)
-     FROM qdx3_fhsbu_tidydata_dev
-         .rec_fhsbu_error_threshold_alert_short_term_tidydata)
-         AS original_count,
-
-    (SELECT SUM(count_judgment)
-     FROM merged_data)
-         AS merged_count;
-```
-
-这里是验证 SQL 的结构示例，两个注释位置需要替换为第一部分对应的实际查询，不能直接将注释当作完整 SQL 执行。
-
-预期结果：
-
-|
-original_rows
-
-|
-
-merged_rows
-
-|
-
-original_count
-
-|
-
-merged_count
-
-|
-| --- | --- | --- | --- |
-|
-
-1000
-
-|
-
-1000
-
-|
-
-5000
-
-|
-
-5000
-
-|
-
-以上数字仅为示例。实际执行时，两组结果必须分别相等。
-
-更严格的验证是比较每个「月份＋错误代码」的 SUM，确保 Pivot 每个单元格的件数也一致。
-
-# 五、一个容易忽略的情况：长期警报只有 long_term 有记录
-
-假设：
-
-```
-short_term：
-2026-08 | A8F0 | 存在数据
-
-long_term：
-2026-08 | A9F0 | alert_type = 4
-```
-
-如果 short_term 中完全没有 A9F0 的数据，那么采用上述 LEFT JOIN 后，Pivot 不会自动生成一个新的 A9F0 单元格。
-
-因为我们是以 short_term 为主表。
-
-这符合「不改变原来的统计件数」的设计，但如果客户还要求显示仅存在于 long_term 的错误代码，就需要另外设计数据集，不能简单地把 long_term 的记录直接追加进去。
-
-最终结论：使用第一部分的 SQL，保留 short_term 原始明细，对 long_term 按月份和全部业务维度进行警报汇总，再 LEFT JOIN。
-
-这是在你已确认的匹配规则下，既能保持 `SUM(count_judgment)` 不变，又能让长期警报参与 QuickSight 背景色判断的实现方式。
-
-
-
-----修改sql
-
-
-WITH long_alert AS (
-
-    SELECT
-        DATE_TRUNC('month', judgment_date)::date
-            AS alert_month,
-
-        series_name,
-        gas_type,
-        err_code,
-        err_type,
-
-        -- 长期警报：存在 alert_type = 4 时返回 4
-        MAX(
-            CASE
-                WHEN alert_type = 4 THEN 4
-                ELSE 0
-            END
-        ) AS is_alert_long
-
-    FROM
-        qdx3_fhsbu_tidydata_dev
-        .rec_fhsbu_error_threshold_alert_long_term_tidydata
-
-    GROUP BY
-        DATE_TRUNC('month', judgment_date)::date,
-        series_name,
-        gas_type,
-        err_code,
-        err_type
-)
-
-SELECT
-
-    -- 保留 short_term 的全部原始字段
-    s.*,
-
-    -- 长期警报标志：4 或 0
-    COALESCE(
-        l.is_alert_long,
-        0
-    ) AS is_alert_long,
-
-    -- 综合背景色判断
-    CASE
-        WHEN s.alert_type > 0
-          OR COALESCE(l.is_alert_long, 0) = 4
-        THEN 1
-        ELSE 0
-    END AS alert_color_flag
-
-FROM
-    qdx3_fhsbu_tidydata_dev
-    .rec_fhsbu_error_threshold_alert_short_term_tidydata AS s
-
-LEFT JOIN long_alert AS l
-
-    ON DATE_TRUNC('month', s.judgment_date)::date
-       = l.alert_month
-
-    AND s.series_name = l.series_name
-
-    AND s.gas_type = l.gas_type
-
-    AND s.err_code = l.err_code
-
-    AND s.err_type = l.err_type;
+最后补充一个字段语义上的区别：`alert_type = 4` 可以用来标记我们人工补充的长期独有记录，但对于同时存在短期和长期告警的记录，`alert_type` 仍然保留 short_term 原值。因此，如果你要判断某条数据是否存在长期告警，统一使用 `is_alert_long = 4` 更准确。
