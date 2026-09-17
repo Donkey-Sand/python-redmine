@@ -494,7 +494,7 @@ MAX(alert_color_flag) > 0
 
 -----sql修改
 
-
+```sql
 
 WITH long_alert AS (
 
@@ -517,7 +517,7 @@ WITH long_alert AS (
         threshold_group_id,
         threshold_group_name,
 
-        4::numeric AS is_alert_long
+        4::numeric AS alert_type_long
 
     FROM
         qdx3_fhsbu_tidydata_dev
@@ -553,25 +553,21 @@ short_data AS (
         s.threshold_c,
         s.threshold_d,
 
-        -- 保留原始 alert_type（0～3）
         s.alert_type,
-
-        -- 保留原始件数
         s.count_judgment,
-
         s.count_comparison_avg,
         s.is_alert,
 
-        -- 长期告警标志：4 或 0
+        -- 长期告警类型：4 或 0
         COALESCE(
-            l.is_alert_long,
+            l.alert_type_long,
             0
-        ) AS is_alert_long,
+        ) AS alert_type_long,
 
-        -- 背景色判断标志：1 或 0
+        -- 综合背景色判断：1 或 0
         CASE
             WHEN s.alert_type > 0
-              OR COALESCE(l.is_alert_long, 0) = 4
+              OR COALESCE(l.alert_type_long, 0) = 4
             THEN 1
             ELSE 0
         END AS alert_color_flag
@@ -593,7 +589,7 @@ short_data AS (
 
 long_only_data AS (
 
-    -- 3. 补充 short_term 中不存在的长期告警
+    -- 3. 补充 short_term 中不存在的月度长期告警
 
     SELECT
         l.judgment_date,
@@ -605,27 +601,24 @@ long_only_data AS (
         l.threshold_group_id,
         l.threshold_group_name,
 
-        -- 明确指定 numeric 类型
         NULL::numeric AS threshold_a,
         NULL::numeric AS threshold_b,
         NULL::numeric AS threshold_c,
         NULL::numeric AS threshold_d,
 
-        -- 长期告警独有记录
+        -- 长期独有记录的 alert_type = 4
         4::numeric AS alert_type,
 
-        -- 不影响短期件数
+        -- 不影响短期件数统计
         0::numeric AS count_judgment,
 
         NULL::numeric AS count_comparison_avg,
-
-        -- 与 short_term.is_alert 的 boolean 类型保持一致
         NULL::boolean AS is_alert,
 
-        -- 长期告警标志
-        4::numeric AS is_alert_long,
+        -- 长期告警类型
+        4::numeric AS alert_type_long,
 
-        -- 背景色标志
+        -- 长期告警独有记录直接标记为红色
         1 AS alert_color_flag
 
     FROM long_alert l
@@ -658,3 +651,4 @@ UNION ALL
 
 SELECT *
 FROM long_only_data;
+```
