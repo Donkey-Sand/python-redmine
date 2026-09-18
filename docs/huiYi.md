@@ -652,3 +652,366 @@ UNION ALL
 SELECT *
 FROM long_only_data;
 ```
+
+
+
+
+
+--------------------
+
+
+
+
+
+Jo，从这两张截图来看，你想确认的是：第一张查询返回 313 条，第二张返回 327 条，究竟是哪 14 条数据不同，以及为什么会出现差异。
+
+我建议直接使用 SQL 对两个视图进行双向差集比较，这样不仅能找出第二张多出来的记录，也能发现第一张独有的记录。
+
+不过，先注意一个重要问题：两张图片的查询条件并不相同。
+
+## 一、先确认两张图片的区别
+
+第一张图片
+
+# 313 条
+
+视图： `v_rec_fhsbu_error_threshold_alert_summary_tidydata2`
+
+查询条件：
+
+SQL
+
+```
+WHERE is_alert IS TRUE
+  AND alert_type_long > 0
+```
+
+也就是说，只查询满足长期告警条件、同时 `is_alert = true` 的数据。
+
+第二张图片
+
+# 327 条
+
+视图： `v_rec_fhsbu_error_threshold_alert_history_tidydata`
+
+查询语句：
+
+SQL
+
+```
+SELECT *
+FROM v_rec_fhsbu_error_threshold_alert_history_tidydata;
+```
+
+没有任何 WHERE 过滤条件。
+
+另外，两张截图显示的数据库连接名称也不同。因此，下面的 SQL 有一个前提：这两个视图必须能够在同一个数据库连接中访问。如果它们位于不同的数据库实例，需要先将数据导入同一个数据库或通过 FDW 等方式建立跨库访问。
+
+## 二、推荐方法：使用 EXCEPT 找出两边不同的记录
+
+从截图中可以看到，两个视图共有以下字段：
+
+* `judgment_date`
+
+* `series_name`
+
+* `gas_type`
+
+* `err_code`
+
+* `err_type`
+
+我们先使用这些字段作为比较依据。
+
+下面使用第一张截图中的数据库前缀。第二个视图暂时使用截图中的名称，请根据实际连接情况补充 schema。
+
+SQL ①：双向比较
+
+复制
+
+SQL
+
+```
+WITH
+a AS (
+    SELECT
+        judgment_date,
+        series_name,
+        gas_type,
+        err_code,
+        err_type
+    FROM qdx3_fhsbu_tidydata_dev.v_rec_fhsbu_error_threshold_alert_summary_tidydata2
+    WHERE is_alert IS TRUE
+      AND alert_type_long > 0
+),
+b AS (
+    SELECT
+        judgment_date,
+        series_name,
+        gas_type,
+        err_code,
+        err_type
+    FROM v_rec_fhsbu_error_threshold_alert_history_tidydata
+)
+SELECT
+    '仅第一张存在' AS difference_type,
+    d.*
+FROM (
+    SELECT * FROM a
+    EXCEPT
+    SELECT * FROM b
+) d
+
+UNION ALL
+
+SELECT
+    '仅第二张存在' AS difference_type,
+    d.*
+FROM (
+    SELECT * FROM b
+    EXCEPT
+    SELECT * FROM a
+) d
+
+ORDER BY difference_type, judgment_date, err_code;
+```
+
+### 如何理解查询结果？
+
+假设执行之后得到：
+
+|
+difference_type
+
+|
+
+judgment_date
+
+|
+
+err_code
+
+|
+| --- | --- | --- |
+|
+
+仅第二张存在
+
+|
+
+2026/08/01
+
+|
+
+18F2
+
+|
+|
+
+仅第二张存在
+
+|
+
+2026/08/01
+
+|
+
+17F1
+
+|
+|
+
+仅第一张存在
+
+|
+
+2025/05/05
+
+|
+
+78F2
+
+|
+
+这只是示例，并非截图中已经确认的差异。
+
+* 「仅第一张存在」：第一张有，但第二张没有。
+
+* 「仅第二张存在」：第二张有，但第一张没有。
+
+注意：327 − 313 = 14，并不代表第二张恰好只有 14 条独有记录。 如果第一张有 5 条独有记录，第二张就可能有 19 条独有记录，两者仍然相差 14 条。
+
+此外，`EXCEPT` 默认会去重，因此上面的 SQL 适合比较不同的业务记录，但无法发现同一业务键出现次数不同的问题。
+
+## 三、进一步检查：是否存在重复记录？
+
+如果你发现上面的 SQL 没有查出足够多的差异，建议使用下面这条 SQL。
+
+它会根据五个公共字段进行分组，比较两个视图中每组记录的实际数量。
+
+SQL ②：比较记录数量差异
+
+复制
+
+SQL
+
+```
+WITH
+a AS (
+    SELECT
+        judgment_date,
+        series_name,
+        gas_type,
+        err_code,
+        err_type,
+        COUNT(*) AS count_a
+    FROM qdx3_fhsbu_tidydata_dev.v_rec_fhsbu_error_threshold_alert_summary_tidydata2
+    WHERE is_alert IS TRUE
+      AND alert_type_long > 0
+    GROUP BY
+        judgment_date, series_name, gas_type,
+        err_code, err_type
+),
+b AS (
+    SELECT
+        judgment_date,
+        series_name,
+        gas_type,
+        err_code,
+        err_type,
+        COUNT(*) AS count_b
+    FROM v_rec_fhsbu_error_threshold_alert_history_tidydata
+    GROUP BY
+        judgment_date, series_name, gas_type,
+        err_code, err_type
+)
+SELECT
+    COALESCE(a.judgment_date, b.judgment_date) AS judgment_date,
+    COALESCE(a.series_name, b.series_name) AS series_name,
+    COALESCE(a.gas_type, b.gas_type) AS gas_type,
+    COALESCE(a.err_code, b.err_code) AS err_code,
+    COALESCE(a.err_type, b.err_type) AS err_type,
+    COALESCE(a.count_a, 0) AS count_first,
+    COALESCE(b.count_b, 0) AS count_second,
+    COALESCE(b.count_b, 0) - COALESCE(a.count_a, 0) AS count_diff
+FROM a
+FULL OUTER JOIN b
+    ON a.judgment_date IS NOT DISTINCT FROM b.judgment_date
+   AND a.series_name IS NOT DISTINCT FROM b.series_name
+   AND a.gas_type IS NOT DISTINCT FROM b.gas_type
+   AND a.err_code IS NOT DISTINCT FROM b.err_code
+   AND a.err_type IS NOT DISTINCT FROM b.err_type
+WHERE COALESCE(a.count_a, 0) <> COALESCE(b.count_b, 0)
+ORDER BY judgment_date, err_code;
+```
+
+这条 SQL 的结果会更直观：
+
+|
+err_code
+
+|
+
+count_first
+
+|
+
+count_second
+
+|
+
+count_diff
+
+|
+| --- | --- | --- | --- |
+|
+
+78F2
+
+|
+
+1
+
+|
+
+2
+
+|
+
+1
+
+|
+|
+
+18F2
+
+|
+
+0
+
+|
+
+1
+
+|
+
+1
+
+|
+|
+
+17F1
+
+|
+
+1
+
+|
+
+0
+
+|
+
+-1
+
+|
+
+同样，这里只是演示结果格式。
+
+## 四、结合你的长期告警开发，我认为还需要检查一个问题
+
+你之前在开发长期告警功能时，涉及将 `short_term` 与 `long_term` 的数据进行合并，并且长期告警使用 `alert_type_long = 4`。
+
+而第一张图片使用的条件是：
+
+SQL
+
+```
+WHERE is_alert IS TRUE
+  AND alert_type_long > 0
+```
+
+这意味着，即使某条记录的 `alert_type_long = 4`，只要 `is_alert = false` 或 NULL，就会被过滤掉。
+
+因此，建议你再运行以下查询：
+
+SQL
+
+```
+SELECT
+    alert_type_long,
+    is_alert,
+    COUNT(*) AS record_count
+FROM qdx3_fhsbu_tidydata_dev.v_rec_fhsbu_error_threshold_alert_summary_tidydata2
+GROUP BY
+    alert_type_long,
+    is_alert
+ORDER BY
+    alert_type_long,
+    is_alert;
+```
+
+通过这个结果，可以确认长期告警记录是否因为 `is_alert` 条件而被排除。
+
+我的建议是先执行 SQL ②。 它能直接显示每个业务键在两个视图中的记录数差异，既能发现缺失记录，也能发现重复记录。之后再根据差异记录检查 `is_alert`、`alert_type_long` 和两个视图的定义，就可以逐步定位 313 与 327 不一致的原因。
+
