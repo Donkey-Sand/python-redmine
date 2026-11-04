@@ -1,3 +1,42 @@
+
+确认了——那篇 AWS 博客确实已经被下架（我这边访问也是 404，link dead）。不过没关系，解法我此前已抓到全文，直接给你完整可操作版本，不需要链接也能照做。文末附两个仍然有效的官方文档作参考。
+
+多选 OR → AND 的完整做法（无需改数据模型）
+
+适用前提：你的数据是"一个实体对应多行/多值"（如一个国家对多个运动、一个订单对多个商品、一篇文章对多个标签）。若每实体只有一行一个值，AND 本身不成立。
+
+① 建 3 个计算字段
+计算字段 表达式 作用 
+选中总数 DistinctCountOver(Sports, [], PRE_AGG) 用户当前选了几个值（筛选后、聚合前统计） 
+实体命中数 DistinctCountOver(Sports, [Country], PRE_AGG) 每个国家命中了几个选中值 
+命中全部? ifelse(选中总数 = 实体命中数, Country, 'N/A') 全命中返回国家名，否则 N/A 
+
+把 Country、Sports 换成你实际的实体字段和筛选字段即可。
+② 视觉对象配置
+
+1. Sports 加多选筛选器（保持默认 OR 行为，让它先筛出所有含任一选中值的行）；
+
+2. 图表分组维度用 命中全部? 这个计算字段；
+
+3. 再给 命中全部? 加一个筛选：排除 N/A。
+
+这样用户多选时，只显示命中全部选中项的实体，OR 就变成 AND 了。它的原理是：先把所有"含任一选中值"的行筛出来（OR），再用 distinct 数比对——实体命中的值数 == 用户选的值数，就说明全中。
+
+仍然有效的官方参考
+
+• DistinctCountOver / distinct_countIf 函数说明：
+https://docs.aws.amazon.com/quicksight/latest/user/distinct_countIf-function.html
+
+• QuickSight 筛选器评估顺序（AND/OR 组合规则）：
+https://docs.aws.amazon.com/zh_cn/quicksight/latest/userguide/filtering-dashboard-data.html
+
+如果你的实际字段不是"实体→多值"结构，或者想让我把这 3 个表达式直接套成你数据里的字段名，把你的字段结构发我，我帮你改写。
+
+
+
+
+
+
 这个"国家-运动"例子来自 AWS 官方博客，原文地址：
 
 Build conditional analytics in Amazon QuickSight using advanced filtering
