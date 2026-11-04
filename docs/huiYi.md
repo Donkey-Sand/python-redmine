@@ -1,3 +1,17 @@
+这个"国家-运动"例子来自 AWS 官方博客，原文地址：
+
+Build conditional analytics in Amazon QuickSight using advanced filtering
+https://aws.amazon.com.cn/blogs/business-intelligence/build-conditional-analytics-in-amazon-quick-suite-using-advanced-filtering/
+
+（对应英文原站：https://aws.amazon.com/blogs/business-intelligence/build-conditional-analytics-in-amazon-quicksight-using-advanced-filtering/）
+
+文章里的步骤就是那三个计算字段（DistinctCountOver(Sports, [], PRE_AGG) / DistinctCountOver(Sports, [Country], PRE_AGG) / ifelse(...)）加"排除 N/A"筛选，和我们上面讲的一致。
+
+
+
+
+
+
 **可以。横向转纵向后，可以设计成“一个多选下拉控件＋SPICE＋按原记录 ID 统计命中数量”的方案，不必每次都回数据库执行 Direct Query。**
 
 但需要在横转纵之后，再补上一个判断：
