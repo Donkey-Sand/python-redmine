@@ -1,58 +1,109 @@
-おはようございます。
+你可以直接在 **QuickSight 的分析画面**里完成。现有的「交換部品」多选下拉框继续使用，几百个部品名都由参数 `replacePartsBinaryParameter` 自动传入。你只需要做两件事：**新增一个计算字段，再把它放进现有的部品 OR 筛选组。** [docs.aws.amazon.com](https://docs.aws.amazon.com/quick/latest/userguide/in-function.html?utm_source=chatgpt.com)
 
-おはようございます。やりましょうか。はい、えーと、まず。 いろいろお話しして、ご用意をしながら、結局なりましたけど、まあ、あの、言ってた通りに、別にここの件数の合計的なところで、ここが一致してないとあかんっていうわけではない、っていうところが一応確認取れたので、はい。
-早上好。我们开始吧。好的，嗯，首先……我们聊了很多，也一边做准备，最后总算弄好了。嗯，正如之前所说，已经确认这里的数量合计不一定非得一致。嗯。
+## 第 1 步：先确认 32 列的编号
 
-うん、なので、まあ、もう純粋に、ここのアートAで2件、アートBで2件、っていうのが出てほしいんであれば、もうこの形。 で持って、あの、あとはフィルターの通りに、もう出すしかないかな、って思ってるんですけど、そこ。 は大丈夫ですかね。
-嗯，所以，如果只是希望这里的艺术A显示两条、艺术B显示两条，那就只能采用这种形式，然后按照筛选条件显示了。这样可以吗？
+在你截图左侧的 **「データ」** 面板里，选中当前这个 `v_sum_fhsbu_warranty_extension_defect_rate_monthly_...` 的 SPICE 数据集，在字段搜索框里输入 `replace_parts_nm_`，往下滚到底。
 
-えーと、一覧表は、えー、縦文字を、えーと、を利用してますね。 はい。 はい、はい。 はい。 えーと、あとは、えー。 エラー。 あ、部品は、あ、えー、エラーは、A、Bで。 しまった場合は、 A、あ。 A。 はい。 あ、あ、A、2件です。はい。 あ、Bは、あ。 これとこれ、ここの2件、2件ですね。
-嗯，列表使用的是竖排文字。是的，是的。嗯，另外……错误。啊，部件……错误分为 A、B 两类。发生这种情况时，A……A。是的，A 有两项。B……这两项，这里的两项，一共两项。
+截图里可以确认字段按 `01_w_01`、`01_w_02`、`01_w_03`、`01_w_04` 这样的规则排列。**下面的完整公式按 `01～08`，每组 `w_01～w_04`，共 32 列编写。** 请确认最后一个字段是：
 
-はい、2件、2件です。はい、はい。 うん、うん。 問題はない、ないです。 問題が出てればいいって言われたので、まあ。 単純に縦文字して、うん。 はい。 で、出してしまいましょう、とか。 はい。 っていうのなんか、ちょっと、このエラー絞ったときに、交換部品だけで別にエラーはあってもなくてもいいよ、みたいな話、ちょっとしてましたけ
-是的，两件，两件。嗯，嗯。没有问题。对方说只要能显示出问题就行，所以……简单地竖排文字，嗯。好，那就先提交吧。之前好像还提到过，筛选这个错误时，只看更换零件就行，至于有没有错误都无所谓。
+```text
+replace_parts_nm_08_w_04_utilization_system_union
+```
 
-ど、あんまりこだわりがないんだったら、どういうフィルターのかけ方、かけ方しても、もう一旦は、こう、もうこれで、これでもう出すと、ここの件数にあんまりこだわりがないんだったら、正直これでええやん、っていう話なんで、うん、もう一旦それでやり切ってしまいましょう、と。
-如果你不是特别在意的话，不管怎么设置筛选条件，先就这样处理、发布出去也行。既然你不太在意这里的数量，说实话，这样不就可以了吗？所以，先按这个方案做完吧。
+如果末尾编号不同，以你画面里的实际字段名为准。另一个容易弄错的地方是，**你之前添加筛选条件的顺序和数据面板的排序不同**。所以这次让公式覆盖全部 32 列，这样不用逐个核对原来 20 条里到底配了哪些。
 
-あとはそれでちょっと画面見てもらって、こういう動きになるんやけどええか、っていうので、もう一旦ちょっとそう、とりあえず物作って、うん、ある程度の形に寄り添った形で。 ああ、はい。 あとはちょっと画面見てもらって、で、こういう形で今動くけど、それでいいっていうので、うん、ちょっとやらっと、あの、いつまでもこの
-接下来先让你看一下画面，确认这种运行方式是否可以。我们先做出一个大致的版本，尽量贴合预期的形式。嗯，好。之后再让你看一下画面，确认目前这样运行是否合适。嗯，先稍微做一下……那个，不能一直这样……
+## 第 2 步：新增计算字段，粘贴完整公式
 
-机上の形でこれやったらどうすんの、これやったらどうすんの、とかって言ってたら、ちょっとあんまりにも進みがなさすぎて、実際じゃあそれでスタートして、12月間に合うか、っていうところがちょっと出てくるんで、うん。 うん、うん、はい。
-如果只是纸上谈兵，一直说“要是这么做怎么办、那么做又怎么办”，进展就会太慢。这样一来，实际开始做之后能不能赶上12月，就成了一个问题。嗯，嗯，好的。
+在当前**分析编辑画面**选择 **「追加」→「計算フィールドを追加」**。如果你的界面把入口放在左侧，则在「データ」面板里找「計算フィールドを追加」。
 
-ちょっともう一旦、ある程度の形で、こういう形でいいよ、っていう話だったんで、ちょっとそれに向けて、うん、まあ一旦もうざっと作り切って、あとは、あの、思ってる形になってるかはもう画面見てもらいながらのほうがええかな、っていうので、はい、ちょっとそういう形にさせてもらいたいな、と思ってます。
-之前我们谈过，先大致做成这个样子就可以了。所以我想先尽快把整体做出来，之后再请您看着画面确认是否符合预期。希望能先按这个方式推进。
+**字段名**填：
 
-うん、はい、了解です。私は、えー、まずは叩き台の、合わせ、合わせてみたいです。はい。 うん。 はい。 うん、うん。 とりあえず縦文字の分作って。 はい、縦文字で。 で、あとそれ持って画面、ちょっと出して、で、フィルター動作させたときに、うん、もうある程度の件数になって、ちゃんと出てきてるかどうか。
-嗯，好的，明白了。我想先做个初稿，试着对齐一下。好。嗯。好。嗯嗯。先把竖排文字的部分做出来。好，竖排文字。然后把它放到画面上显示一下，再运行筛选器，看看结果数量是否达到一定规模，以及能不能正常显示出来。
+```text
+replace_parts_any_match
+```
 
-ああ。 かな、っていうところなので。 はい。 うん。 了解です。はい。 で、もう基本的には言うたら、グラフはもうほぼ、あの、出来上がってると思ってるので、うん、あの、昨日、あの、フィルター6個ぐらいって言ってましたけど、まあ、あと32はもうくっつけてもらったらいいかな、とは思ってるんで。
-啊。大概是这样吧。嗯，明白了。是的。基本上，图表我觉得已经差不多完成了。嗯，昨天你说大概有六个筛选器，我想剩下的32个也可以加上去。
+**公式**粘贴下面这一整段。`in()` 会检查当前行的这一列是否等于用户勾选的任意一个部品名。32 个 `in()` 用 `OR` 相连，所以任何一列命中，整行就返回 `一致`。[docs.aws.amazon.com](https://docs.aws.amazon.com/quick/latest/userguide/in-function.html?utm_source=chatgpt.com)
 
-ああ、はい、はい。すいません。今日は他の部分は対応いたします。はい。 はい、はい。 はい。うん。 なので、まあ、あの、グラフのほうはほぼ、もうあれでええかな、とは思ってるので、はい。 はい、グラフは大丈夫です。 まあ、あの、なんや、あの、ちょっと、あの、ビューの形とか、そ、そこはありますけど。
-啊，好的，好的。不好意思。今天其他部分我会处理。好的。好的。嗯。所以，图表部分我觉得基本上就这样可以了。图表没问题。不过，视图的形式之类的还有一些地方需要调整。
+```text
+ifelse(
+    in({replace_parts_nm_01_w_01_utilization_system_union}, ${replacePartsBinaryParameter})
+    OR in({replace_parts_nm_01_w_02_utilization_system_union}, ${replacePartsBinaryParameter})
+    OR in({replace_parts_nm_01_w_03_utilization_system_union}, ${replacePartsBinaryParameter})
+    OR in({replace_parts_nm_01_w_04_utilization_system_union}, ${replacePartsBinaryParameter})
 
-ああ。 まあ、あの、チョイスとしての、で、出方的なところっていうのは、もうあれかな、とは思ってますんで。 うん。 はい。 なので、あとはちょっとこっち側の、一覧表のほう。 はい。 一覧表。 ちょっと、まず作り切ってみて、はい、あの、どういう形になるか、っていうのを、こっちでも確認しながら。
-嗯。关于作为选项的呈现方式，我想大概就是那样了。嗯。好的。接下来就是我们这边的清单了。好的，清单。我们先把它完整做出来，再一边确认最终会是什么样子。
+    OR in({replace_parts_nm_02_w_01_utilization_system_union}, ${replacePartsBinaryParameter})
+    OR in({replace_parts_nm_02_w_02_utilization_system_union}, ${replacePartsBinaryParameter})
+    OR in({replace_parts_nm_02_w_03_utilization_system_union}, ${replacePartsBinaryParameter})
+    OR in({replace_parts_nm_02_w_04_utilization_system_union}, ${replacePartsBinaryParameter})
 
-あ。 で、あれやったら来週にお客さんにもちょっと見てもらえたらな、っていうぐらいには、はい。 はい。 っていうとこかな、とは思います。 はい。はい、了解です。次は、あ、一覧表に集中してます。はい。 うん、うん、うん。それで、はい、いきましょう。
-啊。然后，如果可以的话，我想下周也让客户稍微看一下，大概就是这个程度。嗯。好的，明白了。接下来，啊，我们先集中处理清单。嗯嗯嗯，那就按这个方向推进吧。
+    OR in({replace_parts_nm_03_w_01_utilization_system_union}, ${replacePartsBinaryParameter})
+    OR in({replace_parts_nm_03_w_02_utilization_system_union}, ${replacePartsBinaryParameter})
+    OR in({replace_parts_nm_03_w_03_utilization_system_union}, ${replacePartsBinaryParameter})
+    OR in({replace_parts_nm_03_w_04_utilization_system_union}, ${replacePartsBinaryParameter})
 
-はい、了解です。 うん。 っていう形で、はい、うん、一番気にしてたのは、ここの件数が絶対一致しなあかんのか、っていうところが一番気にしてたんで。 ああ、そうです。 いいっていう話やったんで、委員会っていうものを呼びましたけどね。
-好的，明白了。嗯，我最在意的是这里的数量是否必须完全一致。啊，是的。既然说没问题，所以我就把它称作“委员会”了。
+    OR in({replace_parts_nm_04_w_01_utilization_system_union}, ${replacePartsBinaryParameter})
+    OR in({replace_parts_nm_04_w_02_utilization_system_union}, ${replacePartsBinaryParameter})
+    OR in({replace_parts_nm_04_w_03_utilization_system_union}, ${replacePartsBinaryParameter})
+    OR in({replace_parts_nm_04_w_04_utilization_system_union}, ${replacePartsBinaryParameter})
 
-うん。 じゃあ、そもそものこの不良率で、何のため出すね、っていうツッコミありましたけども、触れなかったですけど。 そうですよ。 その、不良率は違うです。 うん、違う。 理由があるから、正直、ここの、これ1個を出すん、何の意味があんの、って思いながらも、もう、そこはこれ出すとまた長くなりそうやったんで、もう一旦、置いと
-嗯。那么，关于最初这个不良率，有人质疑“报这个到底是为了什么”，不过我当时没提。是啊，这个不良率不对。嗯，不对。其实是有原因的。说实话，我一边想着“单独拿出这一项到底有什么意义”，一边又觉得要是解释这个，话题可能会变得很长，所以就先搁置了……
+    OR in({replace_parts_nm_05_w_01_utilization_system_union}, ${replacePartsBinaryParameter})
+    OR in({replace_parts_nm_05_w_02_utilization_system_union}, ${replacePartsBinaryParameter})
+    OR in({replace_parts_nm_05_w_03_utilization_system_union}, ${replacePartsBinaryParameter})
+    OR in({replace_parts_nm_05_w_04_utilization_system_union}, ${replacePartsBinaryParameter})
 
-きましたけど、はい。 はい。 なので、まあ、ここは一旦そのまま、あの、出すっていうのは変えずに。 はい。 うん、あの、実際のこの数と、ここの数の合計的なところの意味合いは違いますけど。 はい。 うん。 たまたまこれは合ってますけど、まあ、あの、全然違うパターンも出てくるんでね。
-是的，已经来了。不过，这里暂时还是按原样输出，不做改动。嗯，实际数量和这里的合计数量，含义是不一样的。嗯，这次只是碰巧对上了，但也会出现完全不同的情况。
+    OR in({replace_parts_nm_06_w_01_utilization_system_union}, ${replacePartsBinaryParameter})
+    OR in({replace_parts_nm_06_w_02_utilization_system_union}, ${replacePartsBinaryParameter})
+    OR in({replace_parts_nm_06_w_03_utilization_system_union}, ${replacePartsBinaryParameter})
+    OR in({replace_parts_nm_06_w_04_utilization_system_union}, ${replacePartsBinaryParameter})
 
-はい。 はい。 うん。なんで、まあ、まあ、それは置いといて、はい、一旦は、まあ、この出て、この行としての、あの、分子使って、で、はい、ちゃんとここの12か月の計算は、あの、そのまま入れとく、っていうのは、はい、その形にはしといてもらいたいかな、と。
-是的，是的。嗯，先不说这个。总之，暂时先用这一行的数据作为分子，并保留这里按12个月计算的方式，希望能先按这个形式处理。
+    OR in({replace_parts_nm_07_w_01_utilization_system_union}, ${replacePartsBinaryParameter})
+    OR in({replace_parts_nm_07_w_02_utilization_system_union}, ${replacePartsBinaryParameter})
+    OR in({replace_parts_nm_07_w_03_utilization_system_union}, ${replacePartsBinaryParameter})
+    OR in({replace_parts_nm_07_w_04_utilization_system_union}, ${replacePartsBinaryParameter})
 
-はい。 はい。 はい。 思います。 了解。 はい、です。対応いたします。はい。 はい。 っていう感じかな、と思いますので、はい、ちょっとそれで進めていってもらいたいな、と思います。 はい。 了解です。 はい。 はい。更新としても、はい、やり方は以上ですけど、ジョサンとかなんか、気になるとことか、大丈夫ですかね。
-是的，是的，是的，我想是这样。明白。好的，我们会处理。是的。大概就是这样，所以希望接下来能按这个方向推进。好的，明白。好的。关于更新，处理方式就是这些。乔桑，你还有什么在意的地方吗？都没问题吧？
+    OR in({replace_parts_nm_08_w_01_utilization_system_union}, ${replacePartsBinaryParameter})
+    OR in({replace_parts_nm_08_w_02_utilization_system_union}, ${replacePartsBinaryParameter})
+    OR in({replace_parts_nm_08_w_03_utilization_system_union}, ${replacePartsBinaryParameter})
+    OR in({replace_parts_nm_08_w_04_utilization_system_union}, ${replacePartsBinaryParameter}),
+    '一致',
+    '不一致'
+)
+```
 
-ああ、はい。今は大丈夫です。更新も決めた。次は、あー、この、あの、この方法で進めます。はい。 分かりました。 はい。 はい。じゃあ、ちょっとその形で、うん、お願いします。 はい。 はい。 了解です。 じゃあ、ちょっと早いですけど、終わりましょうかね。
-啊，好的，现在没问题了。更新方案也定下来了。接下来就按这个方法推进。好的，明白了。好，那就先按这个方案来吧，麻烦了。好的，明白。那时间还早，我们就先结束吧。
+点 **「保存」**。如果某个字段名标红，删掉标红的 `{字段名}`，从编辑器的字段列表中点击对应字段重新插入。如果标红的是参数，从编辑器的参数列表中插入现有的 `replacePartsBinaryParameter`。
+
+## 第 3 步：在原来的部品组里腾出一个位置
+
+1. 打开 **「フィルター」** 面板，找到你截图下半部分的 **交換部品组**。认准里面的条件都写着 `replace_parts_nm_...` 和 `replacePartsBinaryParameter`。
+2. 展开这个组，找到任意一个部品条件，例如 `replace_parts_nm_05_w_03_utilization_system_union`。
+3. 点击**该字段这一行右侧**的垃圾桶，移除这一条。此时组里还剩 19 条。新公式已经覆盖这列，所以可以移除。
+4. **保留上方的 `errorcontent` 组，也不要点底部的「すべて削除」。**
+
+## 第 4 步：把新字段加回同一个 OR 组
+
+这是操作里最重要的一步。**点击部品组内部、其他条件下面的「フィルター条件を追加」**。这样新条件和已有部品条件之间显示的才是 **「または」**。如果从面板顶层新建独立筛选，它和旧组之间会变成 **「および」**，只在新增列中命中的记录就可能被旧组挡掉。[docs.aws.amazon.com](https://docs.aws.amazon.com/quick/latest/userguide/add-a-compound-filter.html?utm_source=chatgpt.com)
+
+选中字段 `replace_parts_any_match`，按下表设置：
+
+| 画面项目 | 设置值 |
+|---|---|
+| フィルタータイプ | `カスタムフィルター` |
+| フィルター条件 | `次と等しい` |
+| パラメータを使用 | **不勾选** |
+| 比较值 | `一致`，直接输入这两个字，不加引号 |
+| 最后 | 点击 `適用` |
+
+这里有两个不同的值：**用户在下拉框里选「スタック」等部品名，筛选器在后台判断计算结果是否等于「一致」**。因此用户看到的下拉框、候选部品名和操作方式都和现在一样。[docs.aws.amazon.com](https://docs.aws.amazon.com/quick/latest/userguide/in-function.html?utm_source=chatgpt.com)
+
+## 第 5 步：用明细表验证
+
+先固定机种、月份和错误内容等其他筛选，只改「交換部品」。按下面顺序测：
+
+| 测试 | 你的操作 | 预期结果 |
+|---|---|---|
+| **① 最重要：验证原来漏掉的列** | 找一条已知明细，它的某个部品只出现在原先没配进筛选组的列里。下拉框只选这个部品 | 这条明细仍然显示。如果消失，先检查第 4 步新条件和旧条件之间是否为「または」 |
+| **② 验证多选** | 同时勾选「スタック」和「BBファン」 | 只含「スタック」的行、只含「BBファン」的行，以及两者都有的行，都能显示 |
+| **③ 验证精确匹配** | 只勾「BBファン」 | 如果某行只有「BBファンカンセイ」，其余列也没有「BBファン」，该行应被排除。`in()` 按完整值匹配 [docs.aws.amazon.com](https://docs.aws.amazon.com/quick/latest/userguide/in-function.html?utm_source=chatgpt.com) |
+| **④ 验证全选** | 点击「すべて選択」，与相同机种、月份和错误条件下未限制部品时的件数对照 | 如果业务定义是“全选显示全部明细”，两边件数应一致。若有 32 列全部为空的明细，也单独核对一条。QuickSight 对「すべて選択」使用参数保留值，需要单独验证 [docs.aws.amazon.com](https://docs.aws.amazon.com/quick/latest/userguide/parameters-set-up.html?utm_source=chatgpt.com) |
+
+**完成后的画面特征**：上方错误内容组和下方部品组之间显示 **「および」**；下方部品组内，新字段与旧条件之间显示 **「または」**；新条件显示 **`replace_parts_any_match` →「次と等しい - 一致」**。这样就保留了你原先的组合逻辑，同时覆盖全部 32 个部品字段。
